@@ -14,15 +14,20 @@ if (is_file($localConfigFile)) {
     }
 }
 
-$configValue = static function (string $key, string $default) use ($localConfig): string {
+$configValue = static function (string $key, string $default, bool $allowEmpty = false) use ($localConfig): string {
     $envValue = getenv($key);
-    if (is_string($envValue) && $envValue !== '') {
-        return $envValue;
+    if ($envValue !== false) {
+        $envValue = (string) $envValue;
+        if ($allowEmpty || $envValue !== '') {
+            return $envValue;
+        }
     }
 
-    $localValue = $localConfig[$key] ?? null;
-    if (is_string($localValue) && $localValue !== '') {
-        return $localValue;
+    if (array_key_exists($key, $localConfig)) {
+        $localValue = (string) $localConfig[$key];
+        if ($allowEmpty || $localValue !== '') {
+            return $localValue;
+        }
     }
 
     return $default;
@@ -45,7 +50,7 @@ define('DB_HOST', $configValue('DB_HOST', '127.0.0.1'));
 define('DB_PORT', $configValue('DB_PORT', '3306'));
 define('DB_NAME', $configValue('DB_NAME', 'encuestas2026'));
 define('DB_USER', $configValue('DB_USER', 'root'));
-define('DB_PASS', $configValue('DB_PASS', '12345678'));
+define('DB_PASS', $configValue('DB_PASS', '12345678', true));
 define('DB_CHARSET', 'utf8mb4');
 
 define('SESSION_NAME', 'shalom_encuestas_session');

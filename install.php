@@ -29,10 +29,12 @@ $message = null;
 $error = null;
 $dbHost = DB_HOST;
 $dbUser = DB_USER;
+$dbPass = DB_PASS;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $dbHost = trim((string) ($_POST['db_host'] ?? DB_HOST));
     $dbUser = trim((string) ($_POST['db_user'] ?? DB_USER));
+    $dbPass = (string) ($_POST['db_pass'] ?? DB_PASS);
 
     try {
         if ($dbHost === '') {
@@ -46,11 +48,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         Database::setConnectionOverride([
             'host' => $dbHost,
             'user' => $dbUser,
+            'pass' => $dbPass,
         ]);
         $pdo = Database::createPdo(false);
         persistInstallConfig([
             'DB_HOST' => $dbHost,
             'DB_USER' => $dbUser,
+            'DB_PASS' => $dbPass,
         ]);
         $pdo->exec(sprintf('CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci', DB_NAME));
         $pdo->exec(sprintf('USE `%s`', DB_NAME));
@@ -134,6 +138,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <div class="field">
                                     <label>Usuario DB</label>
                                     <input name="db_user" value="<?= e($dbUser) ?>" required>
+                                </div>
+                                <div class="field">
+                                    <label>Clave DB</label>
+                                    <input name="db_pass" type="password" value="<?= e($dbPass) ?>" autocomplete="current-password">
                                 </div>
                                 <div class="field">
                                     <label>Zona horaria</label>
