@@ -33,7 +33,7 @@ Sistema web para administrar múltiples encuestas con:
 ## Instalación
 
 1. Abra `install.php` en el navegador.
-2. Si necesita otro usuario de base de datos, edítelo en el formulario de instalación.
+2. Si necesita otro host o usuario de base de datos, edítelo en el formulario de instalación.
 3. Confirme la instalación.
 4. Ingrese con las credenciales iniciales.
 
@@ -46,7 +46,7 @@ Por defecto la configuración usa:
 - Clave: `12345678`
 
 Puede sobreescribirlos con variables de entorno `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`.
-Si cambia el usuario desde `install.php`, el instalador lo guarda en `config/local.php`. Las variables de entorno siguen teniendo prioridad.
+Si cambia el host o el usuario desde `install.php`, el instalador los guarda en `config/local.php`. Las variables de entorno siguen teniendo prioridad.
 
 ## Roles disponibles
 

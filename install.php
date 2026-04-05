@@ -27,19 +27,31 @@ function persistInstallConfig(array $overrides): void
 
 $message = null;
 $error = null;
+$dbHost = DB_HOST;
 $dbUser = DB_USER;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $dbHost = trim((string) ($_POST['db_host'] ?? DB_HOST));
     $dbUser = trim((string) ($_POST['db_user'] ?? DB_USER));
 
     try {
+        if ($dbHost === '') {
+            throw new InvalidArgumentException('El host de la base de datos es obligatorio.');
+        }
+
         if ($dbUser === '') {
             throw new InvalidArgumentException('El usuario de la base de datos es obligatorio.');
         }
 
-        Database::setConnectionOverride(['user' => $dbUser]);
+        Database::setConnectionOverride([
+            'host' => $dbHost,
+            'user' => $dbUser,
+        ]);
         $pdo = Database::createPdo(false);
-        persistInstallConfig(['DB_USER' => $dbUser]);
+        persistInstallConfig([
+            'DB_HOST' => $dbHost,
+            'DB_USER' => $dbUser,
+        ]);
         $pdo->exec(sprintf('CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci', DB_NAME));
         $pdo->exec(sprintf('USE `%s`', DB_NAME));
 
@@ -113,7 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <div class="form-grid">
                                 <div class="field">
                                     <label>Host</label>
-                                    <input value="<?= e(DB_HOST) ?>" disabled>
+                                    <input name="db_host" value="<?= e($dbHost) ?>" required>
                                 </div>
                                 <div class="field">
                                     <label>Base de datos</label>
