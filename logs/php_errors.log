@@ -1,0 +1,304 @@
+[05-Apr-2026 00:27:07 America/Guayaquil] [2026-04-05 00:27:07] Call to undefined method SurveyService::buildSurveyAccessConstraint() in /opt/homebrew/var/www/encuestas2026/core/SurveyService.php:87
+#0 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#1 {main}
+
+[05-Apr-2026 00:27:08 America/Guayaquil] [2026-04-05 00:27:08] Call to undefined method SurveyService::buildSurveyAccessConstraint() in /opt/homebrew/var/www/encuestas2026/core/SurveyService.php:87
+#0 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#1 {main}
+
+[05-Apr-2026 00:27:09 America/Guayaquil] [2026-04-05 00:27:09] Call to undefined method SurveyService::buildSurveyAccessConstraint() in /opt/homebrew/var/www/encuestas2026/core/SurveyService.php:87
+#0 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#1 {main}
+
+[05-Apr-2026 00:27:36 America/Guayaquil] [2026-04-05 00:27:36] Call to undefined method SurveyService::buildSurveyAccessConstraint() in /opt/homebrew/var/www/encuestas2026/core/SurveyService.php:87
+#0 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#1 {main}
+
+[05-Apr-2026 00:27:37 America/Guayaquil] [2026-04-05 00:27:37] Call to undefined method SurveyService::buildSurveyAccessConstraint() in /opt/homebrew/var/www/encuestas2026/core/SurveyService.php:87
+#0 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#1 {main}
+
+[05-Apr-2026 00:27:38 America/Guayaquil] [2026-04-05 00:27:38] Call to undefined method SurveyService::buildSurveyAccessConstraint() in /opt/homebrew/var/www/encuestas2026/core/SurveyService.php:87
+#0 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#1 {main}
+
+[05-Apr-2026 00:27:38 America/Guayaquil] [2026-04-05 00:27:38] Call to undefined method SurveyService::buildSurveyAccessConstraint() in /opt/homebrew/var/www/encuestas2026/core/SurveyService.php:87
+#0 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#1 {main}
+
+[05-Apr-2026 00:27:39 America/Guayaquil] [2026-04-05 00:27:39] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#3 {main}
+
+[05-Apr-2026 00:27:41 America/Guayaquil] [2026-04-05 00:27:41] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(NULL)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(11): SurveyService->dashboardSummary()
+#4 {main}
+
+[05-Apr-2026 00:27:42 America/Guayaquil] [2026-04-05 00:27:42] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(NULL)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(11): SurveyService->dashboardSummary()
+#4 {main}
+
+[05-Apr-2026 00:27:43 America/Guayaquil] [2026-04-05 00:27:43] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(NULL)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(11): SurveyService->dashboardSummary()
+#4 {main}
+
+[05-Apr-2026 00:27:49 America/Guayaquil] [2026-04-05 00:27:49] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(NULL)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(11): SurveyService->dashboardSummary()
+#4 {main}
+
+[05-Apr-2026 00:27:51 America/Guayaquil] [2026-04-05 00:27:51] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#3 {main}
+
+[05-Apr-2026 00:27:52 America/Guayaquil] [2026-04-05 00:27:52] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#3 {main}
+
+[05-Apr-2026 00:28:05 America/Guayaquil] [2026-04-05 00:28:05] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#3 {main}
+
+[05-Apr-2026 00:28:07 America/Guayaquil] [2026-04-05 00:28:07] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#3 {main}
+
+[05-Apr-2026 00:28:16 America/Guayaquil] [2026-04-05 00:28:16] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#3 {main}
+
+[05-Apr-2026 00:28:17 America/Guayaquil] [2026-04-05 00:28:17] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#3 {main}
+
+[05-Apr-2026 00:28:18 America/Guayaquil] [2026-04-05 00:28:18] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#3 {main}
+
+[05-Apr-2026 00:28:25 America/Guayaquil] [2026-04-05 00:28:25] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#3 {main}
+
+[05-Apr-2026 00:28:26 America/Guayaquil] [2026-04-05 00:28:26] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#3 {main}
+
+[05-Apr-2026 00:28:32 America/Guayaquil] [2026-04-05 00:28:32] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/reportes/index.php(11): SurveyService->listSurveys()
+#3 {main}
+
+[05-Apr-2026 00:28:33 America/Guayaquil] [2026-04-05 00:28:33] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(NULL)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(11): SurveyService->dashboardSummary()
+#4 {main}
+
+[05-Apr-2026 00:28:35 America/Guayaquil] [2026-04-05 00:28:35] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(NULL)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(11): SurveyService->dashboardSummary()
+#4 {main}
+
+[05-Apr-2026 00:28:48 America/Guayaquil] [2026-04-05 00:28:48] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(NULL)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(11): SurveyService->dashboardSummary()
+#4 {main}
+
+[05-Apr-2026 00:28:49 America/Guayaquil] [2026-04-05 00:28:49] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(NULL)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(11): SurveyService->dashboardSummary()
+#4 {main}
+
+[05-Apr-2026 00:28:58 America/Guayaquil] [2026-04-05 00:28:58] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:28:59 America/Guayaquil] [2026-04-05 00:28:59] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:29:42 America/Guayaquil] [2026-04-05 00:29:42] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:29:43 America/Guayaquil] [2026-04-05 00:29:43] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:29:51 America/Guayaquil] [2026-04-05 00:29:51] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:03 America/Guayaquil] [2026-04-05 00:30:03] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:16 America/Guayaquil] [2026-04-05 00:30:16] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:16 America/Guayaquil] [2026-04-05 00:30:16] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:16 America/Guayaquil] [2026-04-05 00:30:16] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:16 America/Guayaquil] [2026-04-05 00:30:16] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:16 America/Guayaquil] [2026-04-05 00:30:16] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:16 America/Guayaquil] [2026-04-05 00:30:16] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:17 America/Guayaquil] [2026-04-05 00:30:17] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:17 America/Guayaquil] [2026-04-05 00:30:17] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:17 America/Guayaquil] [2026-04-05 00:30:17] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:17 America/Guayaquil] [2026-04-05 00:30:17] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:17 America/Guayaquil] [2026-04-05 00:30:17] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:17 America/Guayaquil] [2026-04-05 00:30:17] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:17 America/Guayaquil] [2026-04-05 00:30:17] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:30:27 America/Guayaquil] [2026-04-05 00:30:27] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:31:13 America/Guayaquil] [2026-04-05 00:31:13] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
+[05-Apr-2026 00:31:29 America/Guayaquil] [2026-04-05 00:31:29] SQLSTATE[42S22]: Column not found: 1054 Unknown column 'sua_count.user_id' in 'field list' in /opt/homebrew/var/www/encuestas2026/core/Database.php:58
+#0 /opt/homebrew/var/www/encuestas2026/core/Database.php(58): PDO->prepare('SELECT\n        ...')
+#1 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(193): Database->fetchAll('SELECT\n        ...', Array)
+#2 /opt/homebrew/var/www/encuestas2026/core/SurveyService.php(181): SurveyService->listSurveys(Array)
+#3 /opt/homebrew/var/www/encuestas2026/dashboard.php(12): SurveyService->dashboardSummary(Array)
+#4 {main}
+
