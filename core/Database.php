@@ -3,6 +3,7 @@
 class Database
 {
     private static ?Database $instance = null;
+    private static array $connectionOverride = [];
     private PDO $pdo;
 
     private function __construct()
@@ -24,13 +25,33 @@ class Database
         self::$instance = null;
     }
 
-    public static function createPdo(bool $withDatabase): PDO
+    public static function setConnectionOverride(array $config): void
     {
-        $dsn = $withDatabase
-            ? sprintf('mysql:host=%s;port=%s;dbname=%s;charset=%s', DB_HOST, DB_PORT, DB_NAME, DB_CHARSET)
-            : sprintf('mysql:host=%s;port=%s;charset=%s', DB_HOST, DB_PORT, DB_CHARSET);
+        self::$connectionOverride = $config;
+        self::reset();
+    }
 
-        return new PDO($dsn, DB_USER, DB_PASS, [
+    public static function clearConnectionOverride(): void
+    {
+        self::$connectionOverride = [];
+        self::reset();
+    }
+
+    public static function createPdo(bool $withDatabase, array $config = []): PDO
+    {
+        $settings = array_merge([
+            'host' => DB_HOST,
+            'port' => DB_PORT,
+            'name' => DB_NAME,
+            'user' => DB_USER,
+            'pass' => DB_PASS,
+        ], self::$connectionOverride, $config);
+
+        $dsn = $withDatabase
+            ? sprintf('mysql:host=%s;port=%s;dbname=%s;charset=%s', $settings['host'], $settings['port'], $settings['name'], DB_CHARSET)
+            : sprintf('mysql:host=%s;port=%s;charset=%s', $settings['host'], $settings['port'], DB_CHARSET);
+
+        return new PDO($dsn, $settings['user'], $settings['pass'], [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,

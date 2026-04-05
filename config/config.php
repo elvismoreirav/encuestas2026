@@ -4,7 +4,31 @@ if (!defined('ENCUESTAS2026')) {
     exit('Acceso no permitido');
 }
 
-define('APP_ENV', getenv('APP_ENV') ?: 'development');
+$localConfig = [];
+$localConfigFile = __DIR__ . '/local.php';
+
+if (is_file($localConfigFile)) {
+    $localConfig = require $localConfigFile;
+    if (!is_array($localConfig)) {
+        $localConfig = [];
+    }
+}
+
+$configValue = static function (string $key, string $default) use ($localConfig): string {
+    $envValue = getenv($key);
+    if (is_string($envValue) && $envValue !== '') {
+        return $envValue;
+    }
+
+    $localValue = $localConfig[$key] ?? null;
+    if (is_string($localValue) && $localValue !== '') {
+        return $localValue;
+    }
+
+    return $default;
+};
+
+define('APP_ENV', $configValue('APP_ENV', 'development'));
 define('APP_DEBUG', APP_ENV !== 'production');
 define('APP_NAME', 'Shalom Encuestas');
 define('APP_VERSION', '1.0.0');
@@ -17,11 +41,11 @@ define('ASSETS_PATH', ROOT_PATH . '/assets');
 define('LOGS_PATH', ROOT_PATH . '/logs');
 define('DATABASE_PATH', ROOT_PATH . '/database');
 
-define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');
-define('DB_PORT', getenv('DB_PORT') ?: '3306');
-define('DB_NAME', getenv('DB_NAME') ?: 'encuestas2026');
-define('DB_USER', getenv('DB_USER') ?: 'root');
-define('DB_PASS', getenv('DB_PASS') ?: '12345678');
+define('DB_HOST', $configValue('DB_HOST', '127.0.0.1'));
+define('DB_PORT', $configValue('DB_PORT', '3306'));
+define('DB_NAME', $configValue('DB_NAME', 'encuestas2026'));
+define('DB_USER', $configValue('DB_USER', 'root'));
+define('DB_PASS', $configValue('DB_PASS', '12345678'));
 define('DB_CHARSET', 'utf8mb4');
 
 define('SESSION_NAME', 'shalom_encuestas_session');

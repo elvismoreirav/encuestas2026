@@ -6,12 +6,40 @@ if (Database::isInstalled()) {
     redirect('login.php');
 }
 
+function persistInstallConfig(array $overrides): void
+{
+    $configFile = CONFIG_PATH . '/local.php';
+    $currentConfig = [];
+
+    if (is_file($configFile)) {
+        $currentConfig = require $configFile;
+        if (!is_array($currentConfig)) {
+            $currentConfig = [];
+        }
+    }
+
+    $configContent = "<?php\n\nreturn " . var_export(array_replace($currentConfig, $overrides), true) . ";\n";
+
+    if (file_put_contents($configFile, $configContent, LOCK_EX) === false) {
+        throw new RuntimeException('No se pudo guardar la configuración local del instalador.');
+    }
+}
+
 $message = null;
 $error = null;
+$dbUser = DB_USER;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $dbUser = trim((string) ($_POST['db_user'] ?? DB_USER));
+
     try {
+        if ($dbUser === '') {
+            throw new InvalidArgumentException('El usuario de la base de datos es obligatorio.');
+        }
+
+        Database::setConnectionOverride(['user' => $dbUser]);
         $pdo = Database::createPdo(false);
+        persistInstallConfig(['DB_USER' => $dbUser]);
         $pdo->exec(sprintf('CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci', DB_NAME));
         $pdo->exec(sprintf('USE `%s`', DB_NAME));
 
@@ -47,6 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $message = 'Instalación completada. Usuario: admin@shalom.local / Clave: Shalom2026!';
     } catch (Throwable $exception) {
         $error = $exception->getMessage();
+        Database::clearConnectionOverride();
     }
 }
 ?>
@@ -92,7 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 </div>
                                 <div class="field">
                                     <label>Usuario DB</label>
-                                    <input value="<?= e(DB_USER) ?>" disabled>
+                                    <input name="db_user" value="<?= e($dbUser) ?>" required>
                                 </div>
                                 <div class="field">
                                     <label>Zona horaria</label>
