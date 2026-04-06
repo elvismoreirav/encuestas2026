@@ -3,7 +3,7 @@
 require_once __DIR__ . '/bootstrap.php';
 
 if (Database::isInstalled()) {
-    redirect('login.php');
+    redirect('admin/');
 }
 
 function persistInstallConfig(array $overrides): void
@@ -157,7 +157,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <?php if ($message): ?>
                     <div class="alert alert-success"><?= e($message) ?></div>
                     <div class="actions-inline">
-                        <a class="btn btn-primary" href="<?= url('login.php') ?>">Ir al acceso</a>
+                        <a class="btn btn-primary" href="<?= url('admin/') ?>">Ir al acceso administrativo</a>
                     </div>
                 <?php else: ?>
                     <?php if ($configFileLocked): ?>

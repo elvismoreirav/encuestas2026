@@ -6,4 +6,4 @@ if (Database::isInstalled()) {
     auth()->logout();
 }
 
-redirect('login.php');
+redirect('admin/');

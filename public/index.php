@@ -20,6 +20,8 @@ if ($selectedSlug !== '') {
 }
 
 $canRespond = $selectedSurvey && (bool) $selectedSurvey['is_public'] && in_array($selectedSurvey['window_status'], ['active', 'closing_soon'], true);
+$landingTitle = count($allSurveys) === 1 ? 'Encuesta disponible' : 'Seleccione una encuesta';
+$selectedIntroText = trim((string) ($selectedSurvey['intro_text'] ?? ''));
 ?>
 <!doctype html>
 <html lang="es">
@@ -37,11 +39,17 @@ $canRespond = $selectedSurvey && (bool) $selectedSurvey['is_public'] && in_array
     <section class="public-hero">
         <div class="public-container">
             <?php if (!$selectedSurvey): ?>
-                <div class="hero-card">
-                    <span class="chip chip-muted">Encuestas públicas</span>
-                    <div>
-                        <h1>Seleccione una encuesta disponible</h1>
-                        <p>El sistema permite múltiples encuestas activas, con ventanas de inicio y cierre, trazabilidad administrativa y experiencia pública optimizada.</p>
+                <div class="hero-card public-landing-card">
+                    <div class="public-landing-header">
+                        <div class="public-brand">
+                            <span class="chip chip-muted">Encuestas públicas</span>
+                            <img src="<?= asset('img/shalom-wordmark.svg') ?>" alt="Shalom">
+                        </div>
+                        <div class="public-landing-copy">
+                            <div>
+                                <h1 class="public-landing-title"><?= e($landingTitle) ?></h1>
+                            </div>
+                        </div>
                     </div>
                     <?php if ($notFoundPublicSurvey): ?>
                         <div class="alert alert-danger">La encuesta solicitada no existe o no está publicada.</div>
@@ -51,19 +59,32 @@ $canRespond = $selectedSurvey && (bool) $selectedSurvey['is_public'] && in_array
                     <?php else: ?>
                         <div class="survey-grid">
                             <?php foreach ($allSurveys as $survey): ?>
-                                <article class="survey-card">
-                                    <span class="<?= e(str_contains($survey['window_status'], 'active') ? 'chip chip-success' : 'chip chip-warning') ?>">
-                                        <?= e($survey['status_label']) ?>
-                                    </span>
-                                    <h3 style="margin-top:14px;"><?= e($survey['name']) ?></h3>
-                                    <p><?= e($survey['description']) ?></p>
-                                    <div class="actions-inline">
-                                        <span class="chip chip-muted">Inicio: <?= e(Helpers::formatDateTime($survey['start_at'])) ?></span>
-                                        <span class="chip chip-muted">Cierre: <?= e(Helpers::formatDateTime($survey['end_at'])) ?></span>
+                                <article class="survey-card survey-card-public">
+                                    <div class="survey-card-header">
+                                        <span class="<?= e(str_contains($survey['window_status'], 'active') ? 'chip chip-success' : 'chip chip-warning') ?>">
+                                            <?= e($survey['status_label']) ?>
+                                        </span>
                                     </div>
-                                    <div class="actions-inline" style="margin-top:14px;">
+                                    <div class="survey-card-body">
+                                        <h2><?= e($survey['name']) ?></h2>
+                                    </div>
+                                    <div class="survey-meta-grid">
+                                        <article class="survey-meta-item">
+                                            <span>Inicio</span>
+                                            <strong><?= e(Helpers::formatDateTime($survey['start_at'])) ?></strong>
+                                        </article>
+                                        <article class="survey-meta-item">
+                                            <span>Cierre</span>
+                                            <strong><?= e(Helpers::formatDateTime($survey['end_at'])) ?></strong>
+                                        </article>
+                                    </div>
+                                    <div class="survey-card-footer">
+                                        <div class="survey-structure">
+                                            <span class="chip chip-muted"><?= (int) $survey['section_count'] ?> secciones</span>
+                                            <span class="chip chip-muted"><?= (int) $survey['question_count'] ?> preguntas</span>
+                                        </div>
                                         <a class="btn btn-primary" href="<?= url('public/index.php?survey=' . urlencode($survey['slug'])) ?>">
-                                            <?= in_array($survey['window_status'], ['active', 'closing_soon'], true) ? 'Responder ahora' : 'Ver detalle' ?>
+                                            <?= in_array($survey['window_status'], ['active', 'closing_soon'], true) ? 'Ingresar encuesta' : 'Ver detalle' ?>
                                         </a>
                                     </div>
                                 </article>
@@ -72,15 +93,29 @@ $canRespond = $selectedSurvey && (bool) $selectedSurvey['is_public'] && in_array
                     <?php endif; ?>
                 </div>
             <?php else: ?>
-                <div class="hero-card">
+                <div class="hero-card public-selected-card">
+                    <div class="public-brand">
+                        <span class="chip chip-muted">Encuesta pública</span>
+                        <img src="<?= asset('img/shalom-wordmark.svg') ?>" alt="Shalom">
+                    </div>
                     <div class="hero-meta">
                         <span class="<?= e($canRespond ? 'chip chip-success' : 'chip chip-warning') ?>"><?= e($selectedSurvey['status_label']) ?></span>
-                        <span class="chip chip-muted">Inicio: <?= e(Helpers::formatDateTime($selectedSurvey['start_at'])) ?></span>
-                        <span class="chip chip-muted">Cierre: <?= e(Helpers::formatDateTime($selectedSurvey['end_at'])) ?></span>
                     </div>
                     <div>
                         <h1><?= e($selectedSurvey['intro_title'] ?: $selectedSurvey['name']) ?></h1>
-                        <p><?= e($selectedSurvey['intro_text'] ?: $selectedSurvey['description']) ?></p>
+                        <?php if ($selectedIntroText !== ''): ?>
+                            <p><?= e($selectedIntroText) ?></p>
+                        <?php endif; ?>
+                    </div>
+                    <div class="survey-meta-grid">
+                        <article class="survey-meta-item">
+                            <span>Inicio oficial</span>
+                            <strong><?= e(Helpers::formatDateTime($selectedSurvey['start_at'])) ?></strong>
+                        </article>
+                        <article class="survey-meta-item">
+                            <span>Cierre oficial</span>
+                            <strong><?= e(Helpers::formatDateTime($selectedSurvey['end_at'])) ?></strong>
+                        </article>
                     </div>
                     <?php if ($canRespond): ?>
                         <div class="survey-stepper" id="surveyStepper"></div>

@@ -160,7 +160,7 @@ class Auth
     public function requireLogin(): void
     {
         if (!$this->check()) {
-            Helpers::redirect('login.php');
+            Helpers::redirect('admin/');
         }
     }
 
