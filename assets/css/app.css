@@ -1467,15 +1467,37 @@ th {
     border: 1px solid transparent;
 }
 
+.survey-step small {
+    display: block;
+    margin-top: 6px;
+    font-size: 0.8rem;
+    color: inherit;
+}
+
 .survey-step.active {
     background: rgba(30, 77, 57, 0.12);
     color: var(--shalom-primary-dark);
     border-color: rgba(30, 77, 57, 0.18);
 }
 
+.survey-step.done {
+    background: rgba(2, 122, 72, 0.08);
+    color: var(--success);
+    border-color: rgba(2, 122, 72, 0.14);
+}
+
 .survey-form {
     display: grid;
     gap: 20px;
+}
+
+.survey-form[aria-busy="true"] {
+    opacity: 0.82;
+}
+
+.survey-form[aria-busy="true"] .question-card,
+.survey-form[aria-busy="true"] .section-banner {
+    pointer-events: none;
 }
 
 .section-banner {
@@ -1495,6 +1517,53 @@ th {
 .section-banner p {
     margin: 0;
     color: var(--text-soft);
+}
+
+.section-progress-panel {
+    display: grid;
+    gap: 12px;
+    padding: 16px 18px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.66);
+    border: 1px solid rgba(30, 77, 57, 0.1);
+}
+
+.section-progress-summary,
+.section-progress-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.section-progress-summary div {
+    display: grid;
+    gap: 4px;
+}
+
+.section-progress-summary span,
+.section-progress-meta span {
+    color: var(--text-soft);
+    font-size: 0.9rem;
+}
+
+.section-progress-summary strong {
+    font-size: 1.1rem;
+    color: var(--shalom-primary-dark);
+}
+
+.section-progress-track {
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(30, 77, 57, 0.08);
+    overflow: hidden;
+}
+
+.section-progress-track span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(135deg, var(--shalom-primary), var(--shalom-primary-light));
 }
 
 .form-alert {
@@ -1567,6 +1636,16 @@ th {
     background: rgba(2, 122, 72, 0.12);
 }
 
+.form-alert-info {
+    background: linear-gradient(135deg, rgba(30, 77, 57, 0.08), rgba(255, 255, 255, 0.92));
+    border-color: rgba(30, 77, 57, 0.14);
+    color: var(--shalom-primary-dark);
+}
+
+.form-alert-info .form-alert-icon {
+    background: rgba(30, 77, 57, 0.1);
+}
+
 .form-status-dock {
     position: fixed;
     right: 22px;
@@ -1604,6 +1683,11 @@ th {
     color: var(--text-soft);
 }
 
+.question-card.is-complete {
+    border-color: rgba(2, 122, 72, 0.2);
+    box-shadow: 0 20px 42px rgba(2, 122, 72, 0.08);
+}
+
 .question-card.is-invalid {
     border-color: rgba(180, 35, 24, 0.3);
     box-shadow: 0 22px 46px rgba(180, 35, 24, 0.08);
@@ -1626,6 +1710,13 @@ th {
     color: var(--shalom-primary);
 }
 
+.question-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
 .question-badge {
     flex-shrink: 0;
     padding: 9px 12px;
@@ -1642,6 +1733,26 @@ th {
 }
 
 .question-badge-optional {
+    background: rgba(30, 77, 57, 0.08);
+    color: var(--shalom-primary);
+}
+
+.question-status {
+    flex-shrink: 0;
+    padding: 9px 12px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.question-status-complete {
+    background: rgba(2, 122, 72, 0.1);
+    color: var(--success);
+}
+
+.question-status-pending {
     background: rgba(30, 77, 57, 0.08);
     color: var(--shalom-primary);
 }
@@ -1684,6 +1795,12 @@ th {
 .choice-card:hover {
     transform: translateY(-2px);
     border-color: rgba(30, 77, 57, 0.22);
+}
+
+.choice-card:has(.choice-input:focus-visible),
+.matrix-option:has(.choice-input:focus-visible) {
+    border-color: rgba(30, 77, 57, 0.3);
+    box-shadow: 0 0 0 4px rgba(30, 77, 57, 0.08);
 }
 
 .choice-input {
@@ -1988,6 +2105,39 @@ th {
     flex-wrap: wrap;
 }
 
+.form-actions-shell {
+    display: grid;
+    gap: 14px;
+    padding: 18px 20px;
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(30, 77, 57, 0.08);
+    box-shadow: var(--shadow);
+}
+
+.form-actions-summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+.form-actions-summary div {
+    display: grid;
+    gap: 4px;
+}
+
+.form-actions-summary strong {
+    font-size: 1rem;
+    color: var(--shalom-primary-dark);
+}
+
+.form-actions-summary span {
+    color: var(--text-soft);
+    font-size: 0.92rem;
+}
+
 .empty-state {
     padding: 28px;
     text-align: center;
@@ -2144,6 +2294,12 @@ th {
         grid-template-columns: 1fr;
     }
 
+    .section-progress-summary,
+    .section-progress-meta,
+    .form-actions-summary {
+        flex-direction: column;
+    }
+
     .survey-card-header,
     .survey-card-footer {
         align-items: flex-start;
@@ -2153,9 +2309,18 @@ th {
         flex-direction: column;
     }
 
+    .question-badges {
+        justify-content: flex-start;
+    }
+
     .choice-card,
     .rating-card {
         min-height: auto;
+    }
+
+    .form-actions .btn {
+        flex: 1 1 100%;
+        text-align: center;
     }
 
     .form-status-dock {

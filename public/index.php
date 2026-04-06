@@ -145,10 +145,15 @@ let currentStep = 0;
 let answers = {};
 let invalidQuestions = new Set();
 let questionErrors = {};
-const startedAt = new Date().toISOString();
+let startedAt = new Date().toISOString();
 const surveySessionToken = ensureSurveySessionToken();
+const surveyDraftKey = `shalom-survey-draft:${surveyData.slug}`;
 let accessTracked = false;
 let formMessage = defaultFormMessage();
+let draftSaveTimer = null;
+let lastDraftSavedAt = null;
+let draftWasRestored = false;
+let isSubmitting = false;
 
 function defaultFormMessage() {
     if (surveyData.window_status === 'closing_soon') {
@@ -194,6 +199,99 @@ function ensureSurveySessionToken() {
         return token;
     } catch (error) {
         return generateSessionToken();
+    }
+}
+
+function readDraft() {
+    try {
+        const rawDraft = window.localStorage.getItem(surveyDraftKey);
+        if (!rawDraft) {
+            return null;
+        }
+
+        const parsedDraft = JSON.parse(rawDraft);
+        return parsedDraft && typeof parsedDraft === 'object' ? parsedDraft : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function persistDraftNow() {
+    try {
+        lastDraftSavedAt = new Date().toISOString();
+        draftWasRestored = false;
+        window.localStorage.setItem(surveyDraftKey, JSON.stringify({
+            answers,
+            currentStep,
+            startedAt,
+            savedAt: lastDraftSavedAt,
+        }));
+    } catch (error) {
+        // Draft persistence should never block the form.
+    }
+}
+
+function scheduleDraftSave() {
+    window.clearTimeout(draftSaveTimer);
+    draftSaveTimer = window.setTimeout(() => {
+        persistDraftNow();
+    }, 180);
+}
+
+function clearDraft() {
+    try {
+        window.localStorage.removeItem(surveyDraftKey);
+    } catch (error) {
+        // Ignore storage cleanup failures.
+    }
+
+    lastDraftSavedAt = null;
+}
+
+function restoreDraft() {
+    const savedDraft = readDraft();
+    if (!savedDraft) {
+        return;
+    }
+
+    if (savedDraft.answers && typeof savedDraft.answers === 'object') {
+        answers = savedDraft.answers;
+    }
+
+    if (Number.isInteger(savedDraft.currentStep)) {
+        currentStep = savedDraft.currentStep;
+    }
+
+    if (typeof savedDraft.startedAt === 'string' && savedDraft.startedAt !== '') {
+        startedAt = savedDraft.startedAt;
+    }
+
+    if (typeof savedDraft.savedAt === 'string' && savedDraft.savedAt !== '') {
+        lastDraftSavedAt = savedDraft.savedAt;
+    }
+
+    draftWasRestored = true;
+    formMessage = {
+        type: 'info',
+        title: 'Se recuperó su progreso',
+        message: 'Puede continuar desde el último avance guardado en este dispositivo.',
+    };
+}
+
+function formatSavedAt(value) {
+    if (!value) {
+        return '';
+    }
+
+    try {
+        return new Intl.DateTimeFormat('es-EC', {
+            hour: '2-digit',
+            minute: '2-digit',
+            day: '2-digit',
+            month: '2-digit',
+        }).format(new Date(value));
+    } catch (error) {
+        return '';
     }
 }
 
@@ -281,7 +379,7 @@ function updateFormMessage() {
 
     const floatingContainer = document.getElementById('surveyFloatingMessage');
     if (floatingContainer) {
-        floatingContainer.innerHTML = renderFormMessage();
+        floatingContainer.innerHTML = renderFloatingMessage();
     }
 }
 
@@ -294,6 +392,7 @@ function renderFormMessage() {
         danger: '!',
         warning: '!',
         success: '✓',
+        info: 'i',
     };
 
     return `
@@ -312,6 +411,14 @@ function renderFormMessage() {
     `;
 }
 
+function renderFloatingMessage() {
+    if (!formMessage || formMessage.type !== 'danger') {
+        return '';
+    }
+
+    return renderFormMessage();
+}
+
 function questionTitle(code) {
     const question = questionLookup[code];
     if (!question) {
@@ -325,16 +432,97 @@ function buildMissingQuestionDetails(codes) {
     return codes.map((code) => questionTitle(code));
 }
 
+function questionHasAnswer(question) {
+    const value = answers[question.code];
+
+    if (question.question_type === 'multiple_choice') {
+        return Array.isArray(value) && value.length > 0;
+    }
+
+    if (question.question_type === 'matrix') {
+        const rows = question.settings?.matrix?.rows || [];
+        const dimensions = question.settings?.matrix?.dimensions || [];
+
+        if (!rows.length || !dimensions.length) {
+            return false;
+        }
+
+        return rows.every((row) => dimensions.every((dimension) => !!answers[question.code]?.[row.code]?.[dimension.code]));
+    }
+
+    return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function getSectionProgress(section) {
+    const total = section.questions.length;
+    const answered = section.questions.filter((question) => questionHasAnswer(question)).length;
+    const requiredQuestions = section.questions.filter((question) => question.is_required);
+    const requiredTotal = requiredQuestions.length;
+    const requiredAnswered = requiredQuestions.filter((question) => questionHasAnswer(question)).length;
+
+    return {
+        total,
+        answered,
+        requiredTotal,
+        requiredAnswered,
+        percent: total > 0 ? Math.round((answered / total) * 100) : 0,
+    };
+}
+
+function getOverallProgress(sections) {
+    const totals = sections.reduce((carry, section) => {
+        const progress = getSectionProgress(section);
+        carry.total += progress.total;
+        carry.answered += progress.answered;
+        return carry;
+    }, {total: 0, answered: 0});
+
+    return {
+        ...totals,
+        percent: totals.total > 0 ? Math.round((totals.answered / totals.total) * 100) : 0,
+    };
+}
+
 function renderSectionBanner(section, sections) {
+    const sectionProgress = getSectionProgress(section);
+    const overallProgress = getOverallProgress(sections);
+    const pendingRequired = Math.max(sectionProgress.requiredTotal - sectionProgress.requiredAnswered, 0);
+    const draftLabel = lastDraftSavedAt
+        ? `${draftWasRestored ? 'Progreso recuperado' : 'Guardado local'} ${formatSavedAt(lastDraftSavedAt)}`
+        : 'Guardado local disponible';
+
     return `
         <section class="section-banner">
             <div class="hero-meta">
                 <span class="chip chip-muted">Paso ${currentStep + 1} de ${sections.length}</span>
-                <span class="chip chip-muted">${section.questions.length} preguntas visibles</span>
+                <span class="chip chip-muted">${sectionProgress.answered}/${sectionProgress.total} respondidas</span>
+                <span class="chip ${pendingRequired > 0 ? 'chip-warning' : 'chip-success'}">
+                    ${pendingRequired > 0 ? `${pendingRequired} obligatorias pendientes` : 'Sección lista'}
+                </span>
+                <span class="chip chip-muted">${draftLabel}</span>
             </div>
             <div>
                 <h2>${escapeHtml(section.title)}</h2>
                 <p>${escapeHtml(section.description || 'Responda esta sección para continuar con el levantamiento.')}</p>
+            </div>
+            <div class="section-progress-panel" aria-label="Progreso de la encuesta">
+                <div class="section-progress-summary">
+                    <div>
+                        <span>Sección actual</span>
+                        <strong>${sectionProgress.percent}%</strong>
+                    </div>
+                    <div>
+                        <span>Avance total</span>
+                        <strong>${overallProgress.answered}/${overallProgress.total}</strong>
+                    </div>
+                </div>
+                <div class="section-progress-track" aria-hidden="true">
+                    <span style="width:${sectionProgress.percent}%"></span>
+                </div>
+                <div class="section-progress-meta">
+                    <span>${sectionProgress.answered} de ${sectionProgress.total} preguntas respondidas</span>
+                    <span>${pendingRequired > 0 ? `${pendingRequired} obligatorias por completar` : 'Puede continuar a la siguiente sección'}</span>
+                </div>
             </div>
         </section>
     `;
@@ -342,11 +530,20 @@ function renderSectionBanner(section, sections) {
 
 function renderStepper(sections) {
     surveyStepper.innerHTML = sections.map((section, index) => `
-        <div class="survey-step ${index === currentStep ? 'active' : ''}">
+        <div class="survey-step ${index === currentStep ? 'active' : ''} ${getSectionProgress(section).percent === 100 ? 'done' : ''}">
             <strong>Paso ${index + 1}</strong><br>
             <span>${escapeHtml(section.title)}</span>
+            <small>${getSectionProgress(section).answered}/${getSectionProgress(section).total}</small>
         </div>
     `).join('');
+
+    window.requestAnimationFrame(() => {
+        surveyStepper.querySelector('.survey-step.active')?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'nearest',
+            inline: 'center',
+        });
+    });
 }
 
 function clearQuestionState(questionCode) {
@@ -435,8 +632,8 @@ function renderMatrix(question) {
     return `
         <div class="matrix-shell">
             <div class="matrix-helper">
-                <span class="chip chip-muted">1 fila = 1 personaje político</span>
-                <span class="chip chip-muted">Estructura tipo matriz como referencia de encuesta Manabí</span>
+                <span class="chip chip-muted">1 fila corresponde a 1 personaje político</span>
+                <span class="chip chip-muted">Seleccione una opción en cada columna</span>
             </div>
             <div class="matrix-head-grid" ${gridStyle}>
                 <div class="matrix-head">Personaje</div>
@@ -482,6 +679,8 @@ function renderMatrix(question) {
 
 function renderQuestion(question) {
     let body = '';
+    const isInvalid = invalidQuestions.has(question.code);
+    const isComplete = questionHasAnswer(question);
 
     if (question.question_type === 'single_choice' || question.question_type === 'rating') {
         body = renderSingleChoice(question);
@@ -493,26 +692,31 @@ function renderQuestion(question) {
         const tag = question.question_type === 'textarea' ? 'textarea' : 'input';
         const value = answers[question.code] ?? '';
         if (tag === 'textarea') {
-            body = `<textarea class="public-control public-textarea" name="${escapeHtml(question.code)}" placeholder="${escapeHtml(question.placeholder || '')}">${escapeHtml(value)}</textarea>`;
+            body = `<textarea class="public-control public-textarea" name="${escapeHtml(question.code)}" placeholder="${escapeHtml(question.placeholder || '')}" aria-invalid="${isInvalid ? 'true' : 'false'}">${escapeHtml(value)}</textarea>`;
         } else {
-            body = `<input class="public-control" type="text" name="${escapeHtml(question.code)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(question.placeholder || '')}">`;
+            body = `<input class="public-control" type="text" name="${escapeHtml(question.code)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(question.placeholder || '')}" aria-invalid="${isInvalid ? 'true' : 'false'}">`;
         }
     }
 
     return `
-        <article class="question-card ${invalidQuestions.has(question.code) ? 'is-invalid' : ''}" data-question="${question.code}">
+        <article class="question-card ${isInvalid ? 'is-invalid' : ''} ${isComplete ? 'is-complete' : ''}" data-question="${question.code}">
             <div class="question-head">
                 <div>
                     <div class="question-kicker">${escapeHtml(question.code)}</div>
                     <h3>${escapeHtml(question.prompt)}</h3>
                     ${question.help_text ? `<p>${escapeHtml(question.help_text)}</p>` : ''}
                 </div>
-                <span class="question-badge ${question.is_required ? 'question-badge-required' : 'question-badge-optional'}">
-                    ${question.is_required ? 'Obligatoria' : 'Opcional'}
-                </span>
+                <div class="question-badges">
+                    <span class="question-status ${isComplete ? 'question-status-complete' : 'question-status-pending'}">
+                        ${isComplete ? 'Respondida' : 'Sin responder'}
+                    </span>
+                    <span class="question-badge ${question.is_required ? 'question-badge-required' : 'question-badge-optional'}">
+                        ${question.is_required ? 'Obligatoria' : 'Opcional'}
+                    </span>
+                </div>
             </div>
             ${body}
-            ${invalidQuestions.has(question.code) ? `<div class="question-error">${escapeHtml(questionErrors[question.code] || 'Debe completar esta pregunta para continuar.')}</div>` : ''}
+            ${isInvalid ? `<div class="question-error">${escapeHtml(questionErrors[question.code] || 'Debe completar esta pregunta para continuar.')}</div>` : ''}
         </article>
     `;
 }
@@ -581,19 +785,28 @@ function renderForm() {
     renderStepper(sections);
 
     surveyApp.innerHTML = `
-        <form class="survey-form" id="publicSurveyForm">
+        <form class="survey-form" id="publicSurveyForm" aria-busy="${isSubmitting ? 'true' : 'false'}">
             <div id="surveyMessage">${renderFormMessage()}</div>
             ${renderSectionBanner(section, sections)}
             ${section.questions.map((question) => renderQuestion(question)).join('')}
-            <div class="form-actions">
-                <button class="btn btn-secondary" type="button" id="prevButton" ${currentStep === 0 ? 'disabled' : ''}>Atrás</button>
-                ${currentStep < sections.length - 1
-                    ? '<button class="btn btn-primary" type="button" id="nextButton">Siguiente</button>'
-                    : '<button class="btn btn-primary" type="submit" id="submitButton">Enviar encuesta</button>'
-                }
+            <div class="form-actions-shell">
+                <div class="form-actions-summary">
+                    <div>
+                        <strong>${currentStep < sections.length - 1 ? 'Continúe al siguiente bloque' : 'Revise y envíe la encuesta'}</strong>
+                        <span>${currentStep < sections.length - 1 ? 'Complete esta sección para seguir avanzando.' : 'El envío puede tardar unos segundos según su conexión.'}</span>
+                    </div>
+                    <button class="btn btn-link" type="button" id="resetSurveyButton" ${isSubmitting ? 'disabled' : ''}>Reiniciar respuestas</button>
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-secondary" type="button" id="prevButton" ${currentStep === 0 || isSubmitting ? 'disabled' : ''}>Atrás</button>
+                    ${currentStep < sections.length - 1
+                        ? `<button class="btn btn-primary" type="button" id="nextButton" ${isSubmitting ? 'disabled' : ''}>Siguiente</button>`
+                        : `<button class="btn btn-primary" type="submit" id="submitButton" ${isSubmitting ? 'disabled' : ''}>${isSubmitting ? 'Enviando...' : 'Enviar encuesta'}</button>`
+                    }
+                </div>
             </div>
         </form>
-        <div id="surveyFloatingMessage" class="form-status-dock">${renderFormMessage()}</div>
+        <div id="surveyFloatingMessage" class="form-status-dock">${renderFloatingMessage()}</div>
     `;
 
     bindFormEvents(section);
@@ -606,9 +819,12 @@ function bindFormEvents(section) {
         input.addEventListener('change', () => {
             answers[input.name] = input.value;
             clearQuestionState(input.dataset.questionCode || input.name);
+            scheduleDraftSave();
             if (shouldRefreshForVisibility(input.name)) {
                 renderForm();
+                return;
             }
+            renderForm();
         });
     });
 
@@ -617,9 +833,12 @@ function bindFormEvents(section) {
             const selected = Array.from(form.querySelectorAll(`input[name="${input.name}"]:checked`)).map((element) => element.value);
             answers[input.name] = selected;
             clearQuestionState(input.dataset.questionCode || input.name);
+            scheduleDraftSave();
             if (shouldRefreshForVisibility(input.name)) {
                 renderForm();
+                return;
             }
+            renderForm();
         });
     });
 
@@ -627,6 +846,11 @@ function bindFormEvents(section) {
         input.addEventListener('input', () => {
             answers[input.name] = input.value;
             clearQuestionState(input.name);
+            scheduleDraftSave();
+        });
+
+        input.addEventListener('blur', () => {
+            renderForm();
         });
     });
 
@@ -634,6 +858,8 @@ function bindFormEvents(section) {
         input.addEventListener('change', () => {
             answers[input.name] = input.value;
             clearQuestionState(input.name);
+            scheduleDraftSave();
+            renderForm();
         });
     });
 
@@ -646,11 +872,14 @@ function bindFormEvents(section) {
             answers[questionCode][rowCode] = answers[questionCode][rowCode] || {};
             answers[questionCode][rowCode][dimensionCode] = input.value;
             clearQuestionState(questionCode);
+            scheduleDraftSave();
+            renderForm();
         });
     });
 
     document.getElementById('prevButton')?.addEventListener('click', () => {
         currentStep -= 1;
+        scheduleDraftSave();
         renderForm();
         window.scrollTo({top: 0, behavior: 'smooth'});
     });
@@ -658,6 +887,24 @@ function bindFormEvents(section) {
     document.getElementById('nextButton')?.addEventListener('click', () => {
         if (!validateStep(section)) return;
         currentStep += 1;
+        scheduleDraftSave();
+        renderForm();
+        window.scrollTo({top: 0, behavior: 'smooth'});
+    });
+
+    document.getElementById('resetSurveyButton')?.addEventListener('click', () => {
+        if (!window.confirm('Se borrarán las respuestas guardadas en este dispositivo para esta encuesta.')) {
+            return;
+        }
+
+        answers = {};
+        invalidQuestions = new Set();
+        questionErrors = {};
+        currentStep = 0;
+        startedAt = new Date().toISOString();
+        draftWasRestored = false;
+        formMessage = defaultFormMessage();
+        clearDraft();
         renderForm();
         window.scrollTo({top: 0, behavior: 'smooth'});
     });
@@ -665,6 +912,10 @@ function bindFormEvents(section) {
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
         if (!validateStep(section)) return;
+
+        isSubmitting = true;
+        persistDraftNow();
+        renderForm();
 
         try {
             const response = await fetch('<?= url('api/public/app.php?action=submit') ?>', {
@@ -680,6 +931,7 @@ function bindFormEvents(section) {
 
             const result = await response.json();
             if (!response.ok || !result.success) {
+                isSubmitting = false;
                 if (result.errors) {
                     invalidQuestions = new Set(Object.keys(result.errors));
                     questionErrors = Object.fromEntries(
@@ -699,10 +951,13 @@ function bindFormEvents(section) {
                     return;
                 }
 
+                renderForm();
                 setFormMessage('danger', 'No fue posible registrar la encuesta', result.message || 'Intente nuevamente en unos segundos.');
                 return;
             }
 
+            window.clearTimeout(draftSaveTimer);
+            clearDraft();
             surveyApp.innerHTML = `
                 <div class="hero-card">
                     <span class="chip chip-success">Respuesta registrada</span>
@@ -717,11 +972,19 @@ function bindFormEvents(section) {
             `;
             window.scrollTo({top: 0, behavior: 'smooth'});
         } catch (error) {
+            isSubmitting = false;
+            renderForm();
             setFormMessage('danger', 'No se pudo enviar la encuesta', 'Verifique su conexión y vuelva a intentarlo.');
         }
     });
 }
 
+restoreDraft();
+window.addEventListener('beforeunload', () => {
+    if (Object.keys(answers).length > 0) {
+        persistDraftNow();
+    }
+});
 trackSurveyAccess();
 renderForm();
 </script>
