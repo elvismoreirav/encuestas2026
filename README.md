@@ -37,6 +37,8 @@ Sistema web para administrar múltiples encuestas con:
 3. Confirme la instalación.
 4. Ingrese con las credenciales iniciales.
 
+Si ya creó la base manualmente y configuró `config/local.php`, el instalador intentará usar esa base existente antes de ejecutar `CREATE DATABASE`.
+
 Por defecto la configuración usa:
 
 - Host: `127.0.0.1`
@@ -47,6 +49,7 @@ Por defecto la configuración usa:
 
 Puede sobreescribirlos con variables de entorno `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`.
 Si cambia el host, el usuario o la clave desde `install.php`, el instalador los guarda en `config/local.php`. Las variables de entorno siguen teniendo prioridad.
+Si `config/local.php` ya existe pero no tiene permisos de escritura, la instalación continuará siempre que sus valores ya coincidan con los enviados desde el formulario.
 
 ## Roles disponibles
 

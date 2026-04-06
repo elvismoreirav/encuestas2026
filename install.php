@@ -18,11 +18,35 @@ function persistInstallConfig(array $overrides): void
         }
     }
 
-    $configContent = "<?php\n\nreturn " . var_export(array_replace($currentConfig, $overrides), true) . ";\n";
+    $mergedConfig = array_replace($currentConfig, $overrides);
+
+    if (is_file($configFile) && !is_writable($configFile)) {
+        foreach ($overrides as $key => $value) {
+            if (($currentConfig[$key] ?? null) !== $value) {
+                throw new RuntimeException('`config/local.php` no es escribible. Actualice ese archivo manualmente con las credenciales correctas antes de instalar.');
+            }
+        }
+
+        return;
+    }
+
+    if (!is_file($configFile) && !is_writable(CONFIG_PATH)) {
+        throw new RuntimeException('La carpeta `config/` no tiene permisos de escritura. Cree `config/local.php` manualmente antes de instalar.');
+    }
+
+    $configContent = "<?php\n\nreturn " . var_export($mergedConfig, true) . ";\n";
 
     if (file_put_contents($configFile, $configContent, LOCK_EX) === false) {
         throw new RuntimeException('No se pudo guardar la configuración local del instalador.');
     }
+}
+
+function shouldCreateDatabase(PDOException $exception): bool
+{
+    $errorInfo = $exception->errorInfo ?? [];
+    $mysqlCode = isset($errorInfo[1]) ? (int) $errorInfo[1] : 0;
+
+    return $mysqlCode === 1049 || str_contains(strtolower($exception->getMessage()), 'unknown database');
 }
 
 $message = null;
@@ -50,14 +74,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'user' => $dbUser,
             'pass' => $dbPass,
         ]);
-        $pdo = Database::createPdo(false);
         persistInstallConfig([
             'DB_HOST' => $dbHost,
             'DB_USER' => $dbUser,
             'DB_PASS' => $dbPass,
         ]);
-        $pdo->exec(sprintf('CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci', DB_NAME));
-        $pdo->exec(sprintf('USE `%s`', DB_NAME));
+
+        try {
+            $pdo = Database::createPdo(true);
+        } catch (PDOException $exception) {
+            if (!shouldCreateDatabase($exception)) {
+                throw $exception;
+            }
+
+            $pdo = Database::createPdo(false);
+            $pdo->exec(sprintf('CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci', DB_NAME));
+            $pdo->exec(sprintf('USE `%s`', DB_NAME));
+        }
 
         $statements = array_filter(array_map('trim', explode(";\n", file_get_contents(DATABASE_PATH . '/schema.sql') ?: '')));
         foreach ($statements as $statement) {
@@ -114,6 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div>
                     <h1>Shalom Encuestas</h1>
                     <p>Configuración automatizada de base de datos, usuario administrador y encuesta semilla de abril 2026.</p>
+                    <p>Si la base ya existe y `config/local.php` fue cargado manualmente, el instalador usará esa configuración sin reescribir el archivo.</p>
                 </div>
                 <?php if ($message): ?>
                     <div class="alert alert-success"><?= e($message) ?></div>
