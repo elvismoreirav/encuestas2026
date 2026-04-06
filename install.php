@@ -51,14 +51,17 @@ function shouldCreateDatabase(PDOException $exception): bool
 
 $message = null;
 $error = null;
+$configFileLocked = is_file(CONFIG_PATH . '/local.php') && !is_writable(CONFIG_PATH . '/local.php');
 $dbHost = DB_HOST;
 $dbUser = DB_USER;
 $dbPass = DB_PASS;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $dbHost = trim((string) ($_POST['db_host'] ?? DB_HOST));
-    $dbUser = trim((string) ($_POST['db_user'] ?? DB_USER));
-    $dbPass = (string) ($_POST['db_pass'] ?? DB_PASS);
+    if (!$configFileLocked) {
+        $dbHost = trim((string) ($_POST['db_host'] ?? DB_HOST));
+        $dbUser = trim((string) ($_POST['db_user'] ?? DB_USER));
+        $dbPass = (string) ($_POST['db_pass'] ?? DB_PASS);
+    }
 
     try {
         if ($dbHost === '') {
@@ -74,11 +77,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'user' => $dbUser,
             'pass' => $dbPass,
         ]);
-        persistInstallConfig([
-            'DB_HOST' => $dbHost,
-            'DB_USER' => $dbUser,
-            'DB_PASS' => $dbPass,
-        ]);
+        if (!$configFileLocked) {
+            persistInstallConfig([
+                'DB_HOST' => $dbHost,
+                'DB_USER' => $dbUser,
+                'DB_PASS' => $dbPass,
+            ]);
+        }
 
         try {
             $pdo = Database::createPdo(true);
@@ -155,6 +160,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <a class="btn btn-primary" href="<?= url('login.php') ?>">Ir al acceso</a>
                     </div>
                 <?php else: ?>
+                    <?php if ($configFileLocked): ?>
+                        <div class="alert alert-info">`config/local.php` está en modo solo lectura. El instalador usará esos valores y no intentará modificarlos.</div>
+                    <?php endif; ?>
                     <?php if ($error): ?>
                         <div class="alert alert-danger"><?= e($error) ?></div>
                     <?php endif; ?>
@@ -163,7 +171,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <div class="form-grid">
                                 <div class="field">
                                     <label>Host</label>
-                                    <input name="db_host" value="<?= e($dbHost) ?>" required>
+                                    <input name="db_host" value="<?= e($dbHost) ?>" <?= $configFileLocked ? 'readonly' : 'required' ?>>
                                 </div>
                                 <div class="field">
                                     <label>Base de datos</label>
@@ -171,11 +179,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 </div>
                                 <div class="field">
                                     <label>Usuario DB</label>
-                                    <input name="db_user" value="<?= e($dbUser) ?>" required>
+                                    <input name="db_user" value="<?= e($dbUser) ?>" <?= $configFileLocked ? 'readonly' : 'required' ?>>
                                 </div>
                                 <div class="field">
                                     <label>Clave DB</label>
-                                    <input name="db_pass" type="password" value="<?= e($dbPass) ?>" autocomplete="current-password">
+                                    <input name="db_pass" type="password" value="<?= e($dbPass) ?>" autocomplete="current-password" <?= $configFileLocked ? 'readonly' : '' ?>>
                                 </div>
                                 <div class="field">
                                     <label>Zona horaria</label>

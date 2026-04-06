@@ -49,7 +49,7 @@ Por defecto la configuración usa:
 
 Puede sobreescribirlos con variables de entorno `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`.
 Si cambia el host, el usuario o la clave desde `install.php`, el instalador los guarda en `config/local.php`. Las variables de entorno siguen teniendo prioridad.
-Si `config/local.php` ya existe pero no tiene permisos de escritura, la instalación continuará siempre que sus valores ya coincidan con los enviados desde el formulario.
+Si `config/local.php` ya existe pero no tiene permisos de escritura, el instalador usará esos valores en modo solo lectura y continuará sin reescribir el archivo.
 
 ## Roles disponibles
 
