@@ -648,6 +648,12 @@ th {
     gap: 18px;
 }
 
+.report-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+}
+
 .chart-card {
     padding: 20px;
     border-radius: 24px;
@@ -1100,6 +1106,118 @@ th {
     min-height: 100vh;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
+}
+
+.login-hero {
+    padding: 36px 20px 24px;
+}
+
+.login-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(360px, 440px);
+    gap: 28px;
+    align-items: stretch;
+}
+
+.login-overview {
+    padding: 28px 8px 28px 0;
+    display: grid;
+    gap: 20px;
+    align-content: center;
+}
+
+.login-brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.login-brand strong,
+.login-brand span {
+    display: block;
+}
+
+.login-brand span {
+    color: var(--text-soft);
+    font-size: 0.95rem;
+}
+
+.login-copy {
+    display: grid;
+    gap: 12px;
+    max-width: 720px;
+}
+
+.login-copy h1 {
+    font-size: clamp(2.4rem, 5vw, 4.4rem);
+    line-height: 0.96;
+}
+
+.login-copy p {
+    font-size: 1.08rem;
+    max-width: 62ch;
+}
+
+.login-points {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.login-point {
+    padding: 18px;
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(30, 77, 57, 0.12);
+    box-shadow: 0 10px 26px rgba(17, 32, 25, 0.05);
+    backdrop-filter: blur(8px);
+}
+
+.login-point strong {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--shalom-primary-dark);
+}
+
+.login-point p {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--text-soft);
+}
+
+.hero-card.login-card {
+    padding: 30px;
+    align-content: center;
+    min-height: 100%;
+}
+
+.login-card-header {
+    display: grid;
+    gap: 14px;
+}
+
+.login-card-header h2 {
+    font-size: 1.9rem;
+}
+
+.login-card-header p {
+    margin: 6px 0 0;
+}
+
+.login-form {
+    display: grid;
+    gap: 18px;
+}
+
+.login-note {
+    font-size: 0.95rem;
+    color: var(--text-soft);
+}
+
+.login-submit {
+    width: 100%;
+    justify-content: center;
+    padding-block: 14px;
 }
 
 .public-hero {
@@ -1784,6 +1902,19 @@ th {
 
     .public-container {
         width: min(100% - 20px, 100%);
+    }
+
+    .login-shell,
+    .login-points {
+        grid-template-columns: 1fr;
+    }
+
+    .login-overview {
+        padding: 0;
+    }
+
+    .hero-card.login-card {
+        padding: 24px;
     }
 
     .hero-card {

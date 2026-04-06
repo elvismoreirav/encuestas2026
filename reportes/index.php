@@ -26,7 +26,7 @@ require TEMPLATES_PATH . '/admin_header.php';
             <p>Explore tendencias, coberturas y señales estadísticas para lectura ejecutiva y revisión detallada.</p>
         </div>
     </div>
-    <form id="statsFilterForm" class="form-grid-3">
+    <form id="statsFilterForm" class="report-filter-grid">
         <div class="field">
             <label>Encuesta</label>
             <select name="survey_id" id="stats_survey_id">
@@ -44,6 +44,12 @@ require TEMPLATES_PATH . '/admin_header.php';
         <div class="field">
             <label>Hasta</label>
             <input type="date" name="to" id="stats_to" value="<?= e($_GET['to'] ?? '') ?>">
+        </div>
+        <div class="field" id="stats_location_field" style="display:none;">
+            <label id="stats_location_label">Ciudad / cantón</label>
+            <select name="location" id="stats_location" disabled>
+                <option value="all">Todos</option>
+            </select>
         </div>
     </form>
     <div class="report-toolbar">
@@ -63,6 +69,16 @@ require TEMPLATES_PATH . '/admin_header.php';
 <div class="grid-cards" id="statsSummaryCards"></div>
 
 <section class="stats-grid">
+    <article class="chart-card report-chart-card">
+        <div class="report-chart-head">
+            <span class="chip chip-muted">Territorio</span>
+            <strong>Distribución por ciudad / cantón</strong>
+            <p id="locationChartDescription">Participación registrada por ciudad o cantón dentro del rango aplicado.</p>
+        </div>
+        <div class="report-canvas-wrap" id="locationChartWrap">
+            <canvas id="locationChart" height="240"></canvas>
+        </div>
+    </article>
     <article class="chart-card report-chart-card">
         <div class="report-chart-head">
             <span class="chip chip-muted">Visión temporal</span>
@@ -136,6 +152,7 @@ require TEMPLATES_PATH . '/admin_header.php';
 </section>
 
 <script>
+let locationChart;
 let trendChart;
 let coverageChart;
 let sectionChart;
@@ -258,6 +275,7 @@ function applyQuickRange(range, button) {
 }
 
 function destroyCharts() {
+    locationChart?.destroy();
     trendChart?.destroy();
     coverageChart?.destroy();
     sectionChart?.destroy();
@@ -269,10 +287,75 @@ function buildEmptyState(message) {
     return `<div class="empty-state">${escapeHtml(message)}</div>`;
 }
 
-function renderSummaryCards(summary, survey) {
+function resetLocationFilterControl() {
+    const field = document.getElementById('stats_location_field');
+    const label = document.getElementById('stats_location_label');
+    const select = document.getElementById('stats_location');
+
+    if (label) {
+        label.textContent = 'Ciudad / cantón';
+    }
+
+    if (select) {
+        select.innerHTML = '<option value="all">Todos</option>';
+        select.value = 'all';
+        select.disabled = true;
+    }
+
+    if (field) {
+        field.style.display = 'none';
+    }
+}
+
+function renderLocationFilterControl(filter) {
+    const field = document.getElementById('stats_location_field');
+    const label = document.getElementById('stats_location_label');
+    const select = document.getElementById('stats_location');
+
+    if (!field || !label || !select) {
+        return;
+    }
+
+    if (!filter?.enabled) {
+        resetLocationFilterControl();
+        return;
+    }
+
+    label.textContent = filter.question_title || 'Ciudad / cantón';
+    const options = Array.isArray(filter.options) && filter.options.length
+        ? filter.options
+        : [{value: 'all', label: filter.all_label || 'Todos', count: 0}];
+
+    select.innerHTML = options.map((option) => {
+        const value = String(option.value ?? 'all');
+        const count = Number(option.count || 0);
+        const countSuffix = count > 0 ? ` (${count})` : '';
+        return `<option value="${escapeHtml(value)}">${escapeHtml(option.label || value)}${countSuffix}</option>`;
+    }).join('');
+
+    select.value = options.some((option) => String(option.value ?? 'all') === String(filter.selected_value ?? 'all'))
+        ? String(filter.selected_value ?? 'all')
+        : 'all';
+    select.disabled = false;
+    field.style.display = '';
+}
+
+function renderSummaryCards(summary, survey, locationFilter) {
     const observedWindow = summary.first_submission_at && summary.last_submission_at
         ? `${formatDate(summary.first_submission_at)} - ${formatDate(summary.last_submission_at)}`
         : 'Sin respuestas dentro del filtro actual';
+    const hasLocationFilter = !!locationFilter?.enabled;
+    const locationCard = hasLocationFilter
+        ? `
+            <article class="card report-summary-card">
+                <div class="metric-label">${escapeHtml(locationFilter.question_title || 'Ciudad / cantón')}</div>
+                <div class="report-summary-main">${escapeHtml(locationFilter.selected_label || 'Todos')}</div>
+                <div class="metric-foot">${locationFilter.selected_value === 'all'
+                    ? `${Number(locationFilter.active_option_count || 0)} ubicaciones con respuestas en el rango`
+                    : `Filtro territorial activo · ${Number(locationFilter.active_option_count || 0)} ubicaciones con registros`}</div>
+            </article>
+        `
+        : '';
 
     document.getElementById('statsSummaryCards').innerHTML = `
         <article class="card report-summary-card">
@@ -295,6 +378,7 @@ function renderSummaryCards(summary, survey) {
             <div class="metric-label">Preguntas parametrizadas</div>
             <div class="metric-foot">${summary.sections} secciones en el instrumento</div>
         </article>
+        ${locationCard}
         <article class="card report-summary-card">
             <div class="metric-label">Ventana observada</div>
             <div class="report-summary-main">${escapeHtml(observedWindow)}</div>
@@ -324,6 +408,86 @@ function mountCanvas(wrapperId, canvasId) {
     const wrapper = document.getElementById(wrapperId);
     wrapper.innerHTML = `<canvas id="${canvasId}"></canvas>`;
     return document.getElementById(canvasId);
+}
+
+function renderLocationChart(data) {
+    const wrapper = document.getElementById('locationChartWrap');
+    const description = document.getElementById('locationChartDescription');
+    const filter = data.location_filter || {};
+    const rows = Array.isArray(data.location_distribution) ? data.location_distribution : [];
+
+    if (description) {
+        description.textContent = filter.enabled
+            ? (filter.selected_value === 'all'
+                ? 'Participación registrada por ciudad o cantón dentro del rango aplicado.'
+                : `Distribución territorial del rango actual. El resto del reporte está filtrado por ${filter.selected_label}.`)
+            : 'La encuesta actual no expone una primera pregunta utilizable como filtro territorial.';
+    }
+
+    if (!filter.enabled) {
+        wrapper.innerHTML = buildEmptyState('La encuesta actual no tiene una primera pregunta disponible para segmentación por ciudad.');
+        return;
+    }
+
+    if (!rows.length || !window.Chart) {
+        wrapper.innerHTML = buildEmptyState('La distribución por ciudad o cantón aparecerá cuando existan respuestas dentro del rango seleccionado.');
+        return;
+    }
+
+    const useHorizontal = rows.length > 6;
+    const selectedValue = filter.selected_value && filter.selected_value !== 'all' ? filter.selected_value : null;
+    const colors = rows.map((row, index) => {
+        if (selectedValue && row.value === selectedValue) {
+            return {
+                solid: '#1e4d39',
+                fill: 'rgba(30, 77, 57, 0.34)',
+            };
+        }
+
+        return getSeriesColor(index + 2);
+    });
+
+    const canvas = mountCanvas('locationChartWrap', 'locationChart');
+    locationChart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: rows.map((item) => shortLabel(item.label, useHorizontal ? 34 : 18)),
+            datasets: [{
+                data: rows.map((item) => Number(item.percentage || 0)),
+                backgroundColor: colors.map((color) => color.fill),
+                borderColor: colors.map((color) => color.solid),
+                borderWidth: 1,
+                borderRadius: 12,
+            }],
+        },
+        options: {
+            indexAxis: useHorizontal ? 'y' : 'x',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {display: false},
+                tooltip: {
+                    callbacks: {
+                        title: (items) => rows[items[0].dataIndex]?.label || '',
+                        label: (context) => {
+                            const row = rows[context.dataIndex];
+                            const value = useHorizontal ? context.parsed.x : context.parsed.y;
+                            return `${formatPercentage(value)} · ${row.count} respuestas`;
+                        },
+                    },
+                },
+            },
+            scales: {
+                [useHorizontal ? 'x' : 'y']: {
+                    beginAtZero: true,
+                    max: 100,
+                    ticks: {
+                        callback: (value) => `${value}%`,
+                    },
+                },
+            },
+        },
+    });
 }
 
 function renderTrendChart(data) {
@@ -743,8 +907,10 @@ function renderTextInsights(data) {
 }
 
 function renderReport(data) {
-    renderSummaryCards(data.summary, data.survey);
+    renderLocationFilterControl(data.location_filter || null);
+    renderSummaryCards(data.summary, data.survey, data.location_filter || null);
     renderHighlights(data.highlights || []);
+    renderLocationChart(data);
     renderTrendChart(data);
     renderCoverageChart(data);
     renderSectionChart(data);
@@ -773,11 +939,13 @@ function downloadStats() {
 function renderReportEmptyState(message) {
     destroyCharts();
     lastStatsPayload = null;
+    resetLocationFilterControl();
     document.getElementById('statsSummaryCards').innerHTML = `<article class="card report-summary-card"><div class="metric-label">${escapeHtml(message)}</div></article>`;
     document.getElementById('statsHighlights').innerHTML = buildEmptyState(message);
     document.getElementById('questionCharts').innerHTML = buildEmptyState(message);
     document.getElementById('matrixPanel').style.display = 'none';
     document.getElementById('textPanel').style.display = 'none';
+    document.getElementById('locationChartWrap').innerHTML = buildEmptyState(message);
     document.getElementById('trendChartWrap').innerHTML = buildEmptyState(message);
     document.getElementById('coverageChartWrap').innerHTML = buildEmptyState(message);
     document.getElementById('sectionChartWrap').innerHTML = buildEmptyState(message);
@@ -807,6 +975,11 @@ function bootReportsPage() {
     document.getElementById('loadStatsButton').addEventListener('click', loadStats);
     document.getElementById('exportStatsButton').addEventListener('click', downloadStats);
     document.getElementById('printReportButton').addEventListener('click', () => window.print());
+    document.getElementById('stats_survey_id').addEventListener('change', () => {
+        resetLocationFilterControl();
+        loadStats();
+    });
+    document.getElementById('stats_location').addEventListener('change', loadStats);
 
     document.querySelectorAll('#quickRangeButtons .segmented-button').forEach((button) => {
         button.addEventListener('click', () => applyQuickRange(button.dataset.range, button));
@@ -815,6 +988,7 @@ function bootReportsPage() {
     document.getElementById('stats_from').addEventListener('change', () => setActiveQuickRange(null));
     document.getElementById('stats_to').addEventListener('change', () => setActiveQuickRange(null));
 
+    resetLocationFilterControl();
     loadStats();
 }
 

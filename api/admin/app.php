@@ -97,6 +97,7 @@ try {
             $stats = surveys()->analytics($surveyId, [
                 'from' => $payload['from'] ?? null,
                 'to' => $payload['to'] ?? null,
+                'location' => $payload['location'] ?? null,
             ], $authUser);
             json_response(['success' => true, 'data' => $stats]);
 

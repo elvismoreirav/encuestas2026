@@ -611,23 +611,76 @@ class SurveyService
             ];
         }
 
-        $where = ['sr.survey_id = :survey_id'];
-        $params = [':survey_id' => $surveyId];
+        $locationQuestion = $this->resolveAnalyticsLocationQuestion($survey);
+        $selectedLocationValue = $this->normalizeAnalyticsFilterValue($filters['location'] ?? null);
+
+        $baseWhere = ['sr.survey_id = :survey_id'];
+        $baseParams = [':survey_id' => $surveyId];
 
         if (!empty($filters['from'])) {
-            $where[] = 'sr.submitted_at >= :from';
-            $params[':from'] = $filters['from'] . ' 00:00:00';
+            $baseWhere[] = 'sr.submitted_at >= :from';
+            $baseParams[':from'] = $filters['from'] . ' 00:00:00';
         }
 
         if (!empty($filters['to'])) {
-            $where[] = 'sr.submitted_at <= :to';
-            $params[':to'] = $filters['to'] . ' 23:59:59';
+            $baseWhere[] = 'sr.submitted_at <= :to';
+            $baseParams[':to'] = $filters['to'] . ' 23:59:59';
         }
 
-        $responses = $this->db->fetchAll(
-            'SELECT sr.id, sr.submitted_at FROM survey_responses sr WHERE ' . implode(' AND ', $where) . ' ORDER BY sr.submitted_at ASC',
-            $params
+        $baseResponses = $this->db->fetchAll(
+            'SELECT sr.id, sr.submitted_at FROM survey_responses sr WHERE ' . implode(' AND ', $baseWhere) . ' ORDER BY sr.submitted_at ASC',
+            $baseParams
         );
+        $baseTotalResponses = count($baseResponses);
+
+        $locationOptions = [];
+        if ($this->analyticsQuestionSupportsLocationFilter($locationQuestion)) {
+            $locationOptions = $this->fetchAnalyticsLocationOptions($locationQuestion, $baseWhere, $baseParams);
+            if ($selectedLocationValue !== null && !in_array($selectedLocationValue, array_column($locationOptions, 'value'), true)) {
+                $selectedLocationValue = null;
+            }
+        } else {
+            $selectedLocationValue = null;
+        }
+
+        $locationSelectedLabel = 'Todos';
+        foreach ($locationOptions as $option) {
+            if ($option['value'] === $selectedLocationValue) {
+                $locationSelectedLabel = $option['label'];
+                break;
+            }
+        }
+
+        $locationFilter = [
+            'enabled' => $this->analyticsQuestionSupportsLocationFilter($locationQuestion),
+            'question_code' => $locationQuestion['code'] ?? null,
+            'question_title' => $locationQuestion['prompt'] ?? null,
+            'question_type' => $locationQuestion['question_type'] ?? null,
+            'selected_value' => $selectedLocationValue ?? 'all',
+            'selected_label' => $locationSelectedLabel,
+            'all_label' => 'Todos',
+            'active_option_count' => count(array_filter($locationOptions, static fn(array $option): bool => (int) ($option['count'] ?? 0) > 0)),
+            'options' => array_merge([[
+                'value' => 'all',
+                'label' => 'Todos',
+                'count' => $baseTotalResponses,
+            ]], $locationOptions),
+        ];
+
+        $locationDistribution = $this->buildAnalyticsLocationDistribution($locationOptions, $baseTotalResponses);
+
+        $where = $baseWhere;
+        $params = $baseParams;
+        if ($selectedLocationValue !== null && $locationQuestion) {
+            $this->appendAnalyticsLocationConstraint($where, $params, $locationQuestion, $selectedLocationValue);
+        }
+
+        $responses = $selectedLocationValue === null
+            ? $baseResponses
+            : $this->db->fetchAll(
+                'SELECT sr.id, sr.submitted_at FROM survey_responses sr WHERE ' . implode(' AND ', $where) . ' ORDER BY sr.submitted_at ASC',
+                $params
+            );
 
         $responseIds = array_map(static fn(array $row): int => (int) $row['id'], $responses);
         $totalResponses = count($responses);
@@ -863,17 +916,181 @@ class SurveyService
                 'average_per_day' => $averagePerDay,
                 'first_submission_at' => $firstSubmittedAt,
                 'last_submission_at' => $lastSubmittedAt,
+                'location_label' => $locationFilter['selected_label'],
+                'active_locations' => $locationFilter['active_option_count'],
                 'date_range' => [
                     'from' => $filters['from'] ?? null,
                     'to' => $filters['to'] ?? null,
                 ],
             ],
+            'location_filter' => $locationFilter,
+            'location_distribution' => $locationDistribution,
             'time_series' => $timeSeries,
             'coverage' => $coverage,
             'section_stats' => array_values($sectionStats),
             'question_stats' => $orderedQuestionStats,
             'highlights' => $highlights,
         ];
+    }
+
+    private function resolveAnalyticsLocationQuestion(array $survey): ?array
+    {
+        $firstSection = $survey['sections'][0] ?? null;
+        if (is_array($firstSection) && !empty($firstSection['questions'][0]) && is_array($firstSection['questions'][0])) {
+            return $firstSection['questions'][0];
+        }
+
+        $fallback = $survey['questions_flat'][0] ?? null;
+        return is_array($fallback) ? $fallback : null;
+    }
+
+    private function normalizeAnalyticsFilterValue(mixed $value): ?string
+    {
+        $normalized = trim((string) ($value ?? ''));
+        if ($normalized === '') {
+            return null;
+        }
+
+        return in_array(strtolower($normalized), ['all', 'todos', '0'], true) ? null : $normalized;
+    }
+
+    private function analyticsQuestionSupportsLocationFilter(?array $question): bool
+    {
+        if (!$question) {
+            return false;
+        }
+
+        return in_array((string) ($question['question_type'] ?? ''), ['single_choice', 'multiple_choice', 'rating', 'text', 'textarea'], true);
+    }
+
+    private function fetchAnalyticsLocationOptions(array $question, array $where, array $params): array
+    {
+        $type = (string) ($question['question_type'] ?? '');
+        $questionId = (int) ($question['id'] ?? 0);
+        if ($questionId <= 0) {
+            return [];
+        }
+
+        if (in_array($type, ['single_choice', 'multiple_choice', 'rating'], true)) {
+            $rows = $this->db->fetchAll(
+                "SELECT rao.option_code AS value, rao.option_label AS label, COUNT(DISTINCT ra.response_id) AS total
+                 FROM survey_responses sr
+                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_id = :location_question_id
+                 INNER JOIN response_answer_options rao ON rao.response_answer_id = ra.id
+                 WHERE " . implode(' AND ', $where) . '
+                 GROUP BY rao.option_code, rao.option_label',
+                [':location_question_id' => $questionId] + $params
+            );
+
+            $countsByValue = [];
+            foreach ($rows as $row) {
+                $value = (string) ($row['value'] ?? '');
+                if ($value === '') {
+                    continue;
+                }
+
+                $countsByValue[$value] = [
+                    'value' => $value,
+                    'label' => (string) ($row['label'] ?? $value),
+                    'count' => (int) ($row['total'] ?? 0),
+                ];
+            }
+
+            $options = [];
+            foreach ((array) ($question['options'] ?? []) as $option) {
+                $value = trim((string) ($option['code'] ?? ''));
+                if ($value === '') {
+                    continue;
+                }
+
+                $options[] = [
+                    'value' => $value,
+                    'label' => trim((string) ($option['label'] ?? $value)),
+                    'count' => (int) ($countsByValue[$value]['count'] ?? 0),
+                ];
+                unset($countsByValue[$value]);
+            }
+
+            foreach ($countsByValue as $option) {
+                $options[] = $option;
+            }
+
+            return $options;
+        }
+
+        if (in_array($type, ['text', 'textarea'], true)) {
+            $rows = $this->db->fetchAll(
+                "SELECT TRIM(ra.answer_text) AS value, TRIM(ra.answer_text) AS label, COUNT(*) AS total
+                 FROM survey_responses sr
+                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_id = :location_question_id
+                 WHERE " . implode(' AND ', $where) . " AND TRIM(COALESCE(ra.answer_text, '')) <> ''
+                 GROUP BY TRIM(ra.answer_text)
+                 ORDER BY TRIM(ra.answer_text) ASC",
+                [':location_question_id' => $questionId] + $params
+            );
+
+            return array_map(static fn(array $row): array => [
+                'value' => (string) ($row['value'] ?? ''),
+                'label' => (string) ($row['label'] ?? ''),
+                'count' => (int) ($row['total'] ?? 0),
+            ], array_values(array_filter($rows, static fn(array $row): bool => trim((string) ($row['value'] ?? '')) !== '')));
+        }
+
+        return [];
+    }
+
+    private function buildAnalyticsLocationDistribution(array $options, int $totalResponses): array
+    {
+        $activeOptions = array_values(array_filter($options, static fn(array $option): bool => (int) ($option['count'] ?? 0) > 0));
+
+        usort($activeOptions, static function (array $left, array $right): int {
+            return ((int) ($right['count'] ?? 0) <=> (int) ($left['count'] ?? 0))
+                ?: strcmp((string) ($left['label'] ?? ''), (string) ($right['label'] ?? ''));
+        });
+
+        return array_map(static function (array $option) use ($totalResponses): array {
+            $count = (int) ($option['count'] ?? 0);
+            return [
+                'value' => (string) ($option['value'] ?? ''),
+                'label' => (string) ($option['label'] ?? ''),
+                'count' => $count,
+                'percentage' => $totalResponses > 0 ? round(($count / $totalResponses) * 100, 1) : 0.0,
+            ];
+        }, $activeOptions);
+    }
+
+    private function appendAnalyticsLocationConstraint(array &$where, array &$params, array $question, string $selectedValue): void
+    {
+        $questionId = (int) ($question['id'] ?? 0);
+        if ($questionId <= 0 || $selectedValue === '') {
+            return;
+        }
+
+        $type = (string) ($question['question_type'] ?? '');
+        $params[':location_filter_question_id'] = $questionId;
+        $params[':location_filter_value'] = $selectedValue;
+
+        if (in_array($type, ['single_choice', 'multiple_choice', 'rating'], true)) {
+            $where[] = 'EXISTS (
+                SELECT 1
+                FROM response_answers ra_filter
+                INNER JOIN response_answer_options rao_filter ON rao_filter.response_answer_id = ra_filter.id
+                WHERE ra_filter.response_id = sr.id
+                  AND ra_filter.question_id = :location_filter_question_id
+                  AND rao_filter.option_code = :location_filter_value
+            )';
+            return;
+        }
+
+        if (in_array($type, ['text', 'textarea'], true)) {
+            $where[] = "EXISTS (
+                SELECT 1
+                FROM response_answers ra_filter
+                WHERE ra_filter.response_id = sr.id
+                  AND ra_filter.question_id = :location_filter_question_id
+                  AND TRIM(COALESCE(ra_filter.answer_text, '')) = :location_filter_value
+            )";
+        }
     }
 
     public function submitResponse(string $slug, array $payload): array
