@@ -45,16 +45,47 @@ require TEMPLATES_PATH . '/admin_header.php';
             <input type="date" name="to" id="response_to" value="<?= e($_GET['to'] ?? '') ?>">
         </div>
     </form>
-    <div class="actions-inline" style="margin-top:16px;">
-        <button class="btn btn-primary" type="button" id="loadResponsesButton">Buscar respuestas</button>
-    </div>
 </section>
+
+<div class="grid-cards" id="responseSummaryCards">
+    <article class="card">
+        <div class="metric-value">0</div>
+        <div class="metric-label">Respuestas visibles</div>
+        <div class="metric-foot">Aplique filtros para actualizar este resumen</div>
+    </article>
+    <article class="card">
+        <div class="metric-value">0</div>
+        <div class="metric-label">Encuestas cubiertas</div>
+        <div class="metric-foot">Instrumentos presentes en el resultado actual</div>
+    </article>
+    <article class="card">
+        <div class="metric-value">0</div>
+        <div class="metric-label">Promedio de preguntas</div>
+        <div class="metric-foot">Promedio de respuestas capturadas por formulario</div>
+    </article>
+    <article class="card">
+        <div class="metric-value">-</div>
+        <div class="metric-label">Última captura</div>
+        <div class="metric-foot">Se actualizará cuando existan registros</div>
+    </article>
+</div>
 
 <section class="panel">
     <div class="panel-header">
         <div>
             <h2>Listado</h2>
             <p>Tabla enriquecida para revisión, exportación y trazabilidad.</p>
+        </div>
+    </div>
+    <div class="report-toolbar">
+        <div class="actions-inline">
+            <button class="btn btn-primary" type="button" id="loadResponsesButton">Buscar respuestas</button>
+            <button class="btn btn-link" type="button" id="clearResponseFiltersButton">Limpiar filtros</button>
+        </div>
+        <div class="segmented-actions" id="responseQuickRangeButtons">
+            <button class="segmented-button" type="button" data-range="7">7 días</button>
+            <button class="segmented-button" type="button" data-range="30">30 días</button>
+            <button class="segmented-button" type="button" data-range="all">Todo</button>
         </div>
     </div>
     <div class="table-shell">
@@ -104,6 +135,18 @@ function formatDateTime(value) {
     });
 }
 
+function formatDate(value) {
+    if (!value) {
+        return 'Sin fecha';
+    }
+
+    return new Date(String(value).replace(' ', 'T')).toLocaleDateString('es-EC', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    });
+}
+
 function notify(type, title, message) {
     if (window.ShalomApp?.notify) {
         window.ShalomApp.notify(type, title, message);
@@ -116,6 +159,78 @@ function notify(type, title, message) {
 function getResponseFilters() {
     const form = document.getElementById('responseFilterForm');
     return new URLSearchParams(new FormData(form)).toString();
+}
+
+function toDateInputValue(date) {
+    const adjusted = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
+    return adjusted.toISOString().slice(0, 10);
+}
+
+function setActiveResponseQuickRange(activeButton = null) {
+    document.querySelectorAll('#responseQuickRangeButtons .segmented-button').forEach((button) => {
+        button.classList.toggle('active', button === activeButton);
+    });
+}
+
+function applyResponseQuickRange(range, button) {
+    const fromInput = document.getElementById('response_from');
+    const toInput = document.getElementById('response_to');
+    const today = new Date();
+
+    if (range === 'all') {
+        fromInput.value = '';
+        toInput.value = '';
+    } else {
+        const days = Number(range);
+        const fromDate = new Date(today);
+        fromDate.setDate(today.getDate() - Math.max(days - 1, 0));
+        fromInput.value = toDateInputValue(fromDate);
+        toInput.value = toDateInputValue(today);
+    }
+
+    setActiveResponseQuickRange(button);
+    loadResponses();
+}
+
+function renderResponseSummary(rows) {
+    const container = document.getElementById('responseSummaryCards');
+    if (!container) {
+        return;
+    }
+
+    const total = rows.length;
+    const surveys = new Set(rows.map((row) => row.survey_name)).size;
+    const averageAnswers = total ? (rows.reduce((sum, row) => sum + Number(row.answer_count || 0), 0) / total).toFixed(1) : '0.0';
+    const latestRow = rows.reduce((latest, row) => {
+        if (!latest) {
+            return row;
+        }
+
+        return new Date(String(row.submitted_at).replace(' ', 'T')) > new Date(String(latest.submitted_at).replace(' ', 'T')) ? row : latest;
+    }, null);
+
+    container.innerHTML = `
+        <article class="card">
+            <div class="metric-value">${total}</div>
+            <div class="metric-label">Respuestas visibles</div>
+            <div class="metric-foot">Registros devueltos por el filtro actual</div>
+        </article>
+        <article class="card">
+            <div class="metric-value">${surveys}</div>
+            <div class="metric-label">Encuestas cubiertas</div>
+            <div class="metric-foot">Instrumentos presentes en la muestra filtrada</div>
+        </article>
+        <article class="card">
+            <div class="metric-value">${averageAnswers}</div>
+            <div class="metric-label">Promedio de preguntas</div>
+            <div class="metric-foot">Respuestas registradas por formulario</div>
+        </article>
+        <article class="card">
+            <div class="metric-value">${latestRow ? formatDate(latestRow.submitted_at) : '-'}</div>
+            <div class="metric-label">Última captura</div>
+            <div class="metric-foot">${latestRow ? `${escapeHtml(latestRow.survey_name)} · ${formatDateTime(latestRow.submitted_at)}` : 'No hay registros para mostrar'}</div>
+        </article>
+    `;
 }
 
 function renderFallbackTable(rows) {
@@ -170,6 +285,7 @@ async function loadResponses() {
     }
 
     const rows = result.data;
+    renderResponseSummary(rows);
 
     if (window.Tabulator) {
         responsesFallback.style.display = 'none';
@@ -320,7 +436,7 @@ async function loadResponseDetail(id) {
     }
 
     const detail = result.data;
-    responseModal.classList.add('open');
+    window.ShalomApp?.openModal(responseModal);
     responseModalMeta.textContent = `${detail.survey_name} | ${formatDateTime(detail.submitted_at)}`;
     responseModalBody.innerHTML = `
         ${renderCaptureSummary(detail)}
@@ -335,6 +451,16 @@ async function loadResponseDetail(id) {
 
 function bootResponsesPage() {
     document.getElementById('loadResponsesButton').addEventListener('click', loadResponses);
+    document.getElementById('clearResponseFiltersButton').addEventListener('click', () => {
+        document.getElementById('response_survey_id').value = '';
+        document.getElementById('response_from').value = '';
+        document.getElementById('response_to').value = '';
+        setActiveResponseQuickRange(null);
+        loadResponses();
+    });
+    document.querySelectorAll('#responseQuickRangeButtons .segmented-button').forEach((button) => {
+        button.addEventListener('click', () => applyResponseQuickRange(button.dataset.range || 'all', button));
+    });
     responsesFallback.addEventListener('click', handleResponseActionClick);
     loadResponses();
 }

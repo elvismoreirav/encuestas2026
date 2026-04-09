@@ -24,6 +24,28 @@ $breadcrumbs = [
     ['title' => 'Encuestas', 'url' => url('encuestas/index.php')],
     ['title' => $survey['name']],
 ];
+$sectionCount = count($survey['sections']);
+$questionCount = count($survey['questions_flat']);
+$requiredCount = count(array_filter($survey['questions_flat'], static fn(array $question): bool => (bool) $question['is_required']));
+$conditionalCount = count(array_filter($survey['questions_flat'], static fn(array $question): bool => $question['visibility_rules'] !== []));
+$questionTypes = [
+    'single_choice' => 'Selección única',
+    'multiple_choice' => 'Selección múltiple',
+    'rating' => 'Escala / valoración',
+    'text' => 'Texto corto',
+    'textarea' => 'Texto largo',
+    'matrix' => 'Matriz',
+];
+$sectionSummaries = array_map(static function (array $section): array {
+    $questions = $section['questions'] ?? [];
+    return [
+        'id' => (int) $section['id'],
+        'title' => (string) $section['title'],
+        'question_count' => count($questions),
+        'required_count' => count(array_filter($questions, static fn(array $question): bool => (bool) $question['is_required'])),
+        'conditional_count' => count(array_filter($questions, static fn(array $question): bool => $question['visibility_rules'] !== [])),
+    ];
+}, $survey['sections']);
 
 require TEMPLATES_PATH . '/admin_header.php';
 ?>
@@ -34,8 +56,8 @@ require TEMPLATES_PATH . '/admin_header.php';
             <p><?= e($survey['description'] ?: 'Sin descripción.') ?></p>
             <div class="actions-inline" style="margin-top:14px;">
                 <span class="chip chip-muted"><?= e($survey['slug']) ?></span>
-                <span class="chip chip-muted"><?= (int) count($survey['sections']) ?> secciones</span>
-                <span class="chip chip-muted"><?= (int) count($survey['questions_flat']) ?> preguntas</span>
+                <span class="chip chip-muted"><?= $sectionCount ?> secciones</span>
+                <span class="chip chip-muted"><?= $questionCount ?> preguntas</span>
             </div>
         </div>
         <div class="actions-inline">
@@ -46,67 +68,192 @@ require TEMPLATES_PATH . '/admin_header.php';
     </div>
 </section>
 
-<?php if ($survey['sections'] === []): ?>
-    <section class="panel">
-        <div class="empty-state">Todavía no existen secciones. Cree una o use la carga masiva.</div>
-    </section>
-<?php else: ?>
-    <?php foreach ($survey['sections'] as $section): ?>
-        <section class="section-card">
-            <header>
-                <div>
-                    <h3><?= e($section['title']) ?></h3>
-                    <p><?= e($section['description'] ?: 'Sin descripción.') ?></p>
-                </div>
-                <div class="actions-inline">
-                    <button class="btn btn-secondary js-edit-section" type="button" data-id="<?= (int) $section['id'] ?>" data-open-modal="sectionModal">Editar sección</button>
-                    <button class="btn btn-secondary js-new-question" type="button" data-section-id="<?= (int) $section['id'] ?>" data-open-modal="questionModal">Nueva pregunta</button>
-                    <button class="btn btn-danger js-delete-section" type="button" data-id="<?= (int) $section['id'] ?>">Eliminar</button>
-                </div>
-            </header>
-            <div class="question-list">
-                <?php if ($section['questions'] === []): ?>
-                    <div class="empty-state">No hay preguntas en esta sección.</div>
-                <?php else: ?>
-                    <?php foreach ($section['questions'] as $question): ?>
-                        <article class="question-item">
-                            <div class="actions-inline" style="justify-content:space-between;">
-                                <div>
-                                    <h4><?= e($question['code']) ?>. <?= e($question['prompt']) ?></h4>
-                                    <?php if ($question['help_text']): ?>
-                                        <p><?= e($question['help_text']) ?></p>
-                                    <?php endif; ?>
-                                </div>
-                                <div class="actions-inline">
-                                    <button class="btn btn-secondary js-edit-question" type="button" data-id="<?= (int) $question['id'] ?>" data-open-modal="questionModal">Editar</button>
-                                    <button class="btn btn-danger js-delete-question" type="button" data-id="<?= (int) $question['id'] ?>">Eliminar</button>
-                                </div>
-                            </div>
-                            <div class="question-meta">
-                                <span class="chip chip-muted"><?= e($question['question_type']) ?></span>
-                                <span class="chip chip-muted"><?= $question['is_required'] ? 'Obligatoria' : 'Opcional' ?></span>
-                                <span class="chip chip-muted">Orden <?= (int) $question['sort_order'] ?></span>
-                                <?php if ($question['visibility_rules'] !== []): ?>
-                                    <span class="chip chip-warning">Condicional</span>
+<div class="grid-cards">
+    <article class="card">
+        <div class="metric-value"><?= $sectionCount ?></div>
+        <div class="metric-label">Secciones activas</div>
+        <div class="metric-foot">Bloques de navegación del instrumento</div>
+    </article>
+    <article class="card">
+        <div class="metric-value"><?= $questionCount ?></div>
+        <div class="metric-label">Preguntas configuradas</div>
+        <div class="metric-foot">Estructura total disponible en esta encuesta</div>
+    </article>
+    <article class="card">
+        <div class="metric-value"><?= $requiredCount ?></div>
+        <div class="metric-label">Obligatorias</div>
+        <div class="metric-foot">Preguntas que el formulario exige responder</div>
+    </article>
+    <article class="card">
+        <div class="metric-value"><?= $conditionalCount ?></div>
+        <div class="metric-label">Condicionales</div>
+        <div class="metric-foot">Visibilidad dependiente de otra respuesta</div>
+    </article>
+</div>
+
+<section class="panel panel-muted">
+    <div class="panel-header">
+        <div>
+            <h2>Explorador de estructura</h2>
+            <p>Busque por código o enunciado, filtre por tipo y navegue entre secciones sin perder contexto.</p>
+        </div>
+        <div class="actions-inline">
+            <button class="btn btn-secondary btn-compact" type="button" id="expandSectionsButton">Expandir todo</button>
+            <button class="btn btn-secondary btn-compact" type="button" id="collapseSectionsButton">Contraer todo</button>
+        </div>
+    </div>
+    <div class="admin-toolbar">
+        <div class="field">
+            <label for="questionSearchInput">Buscar pregunta</label>
+            <input type="search" id="questionSearchInput" placeholder="Código, enunciado o texto de ayuda">
+        </div>
+        <div class="field">
+            <label for="questionTypeFilter">Tipo</label>
+            <select id="questionTypeFilter">
+                <option value="all">Todos</option>
+                <?php foreach ($questionTypes as $questionTypeValue => $questionTypeLabel): ?>
+                    <option value="<?= e($questionTypeValue) ?>"><?= e($questionTypeLabel) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <label class="toggle-chip">
+            <input type="checkbox" id="conditionalOnlyToggle">
+            <span>Mostrar solo preguntas condicionales</span>
+        </label>
+        <div class="toolbar-meta" id="editorResultsMeta">
+            Mostrando <strong><?= $questionCount ?></strong> preguntas en <strong><?= $sectionCount ?></strong> secciones.
+        </div>
+    </div>
+</section>
+
+<div class="editor-shell">
+    <div class="editor-main">
+        <?php if ($survey['sections'] === []): ?>
+            <section class="panel">
+                <div class="empty-state">Todavía no existen secciones. Cree una o use la carga masiva.</div>
+            </section>
+        <?php else: ?>
+            <div id="editorFilterEmptyState" class="empty-state" style="display:none;">No hay preguntas que coincidan con los filtros aplicados.</div>
+            <?php foreach ($survey['sections'] as $section): ?>
+                <?php
+                $sectionQuestions = $section['questions'] ?? [];
+                $sectionRequiredCount = count(array_filter($sectionQuestions, static fn(array $question): bool => (bool) $question['is_required']));
+                $sectionConditionalCount = count(array_filter($sectionQuestions, static fn(array $question): bool => $question['visibility_rules'] !== []));
+                ?>
+                <section class="section-card editor-section-card" id="section-<?= (int) $section['id'] ?>" data-section-card>
+                    <header class="section-card-header">
+                        <div>
+                            <h3><?= e($section['title']) ?></h3>
+                            <p><?= e($section['description'] ?: 'Sin descripción.') ?></p>
+                            <div class="section-card-meta">
+                                <span class="chip chip-muted"><?= count($sectionQuestions) ?> preguntas</span>
+                                <span class="chip chip-muted"><?= $sectionRequiredCount ?> obligatorias</span>
+                                <?php if ($sectionConditionalCount > 0): ?>
+                                    <span class="chip chip-warning"><?= $sectionConditionalCount ?> condicionales</span>
                                 <?php endif; ?>
                             </div>
-                            <?php if ($question['options'] !== []): ?>
-                                <div class="question-meta">
-                                    <?php foreach (array_slice($question['options'], 0, 4) as $option): ?>
-                                        <span class="chip chip-muted"><?= e($option['label']) ?></span>
-                                    <?php endforeach; ?>
-                                    <?php if (count($question['options']) > 4): ?>
-                                        <span class="chip chip-muted">+<?= count($question['options']) - 4 ?> opciones</span>
+                        </div>
+                        <div class="actions-inline">
+                            <button class="btn btn-secondary btn-compact js-toggle-section" type="button" data-section-toggle="section-body-<?= (int) $section['id'] ?>">Contraer</button>
+                            <button class="btn btn-secondary js-edit-section" type="button" data-id="<?= (int) $section['id'] ?>" data-open-modal="sectionModal">Editar sección</button>
+                            <button class="btn btn-secondary js-new-question" type="button" data-section-id="<?= (int) $section['id'] ?>" data-open-modal="questionModal">Nueva pregunta</button>
+                            <button class="btn btn-danger js-delete-section" type="button" data-id="<?= (int) $section['id'] ?>">Eliminar</button>
+                        </div>
+                    </header>
+                    <div class="question-list" id="section-body-<?= (int) $section['id'] ?>" data-section-body>
+                        <?php if ($sectionQuestions === []): ?>
+                            <div class="empty-state">No hay preguntas en esta sección.</div>
+                        <?php else: ?>
+                            <?php foreach ($sectionQuestions as $question): ?>
+                                <?php
+                                $searchChunks = [
+                                    $question['code'],
+                                    $question['prompt'],
+                                    $question['help_text'] ?? '',
+                                    implode(' ', array_map(static fn(array $option): string => (string) ($option['label'] ?? ''), $question['options'] ?? [])),
+                                ];
+                                ?>
+                                <article
+                                    class="question-item"
+                                    data-question-item
+                                    data-question-search="<?= e(strtolower(trim(implode(' ', array_filter($searchChunks, static fn($value): bool => $value !== null && $value !== ''))))) ?>"
+                                    data-question-type="<?= e($question['question_type']) ?>"
+                                    data-question-conditional="<?= $question['visibility_rules'] !== [] ? '1' : '0' ?>"
+                                >
+                                    <div class="question-item-head">
+                                        <div>
+                                            <h4><?= e($question['code']) ?>. <?= e($question['prompt']) ?></h4>
+                                            <?php if ($question['help_text']): ?>
+                                                <p><?= e($question['help_text']) ?></p>
+                                            <?php endif; ?>
+                                        </div>
+                                        <div class="actions-inline">
+                                            <button class="btn btn-secondary js-edit-question" type="button" data-id="<?= (int) $question['id'] ?>" data-open-modal="questionModal">Editar</button>
+                                            <button class="btn btn-danger js-delete-question" type="button" data-id="<?= (int) $question['id'] ?>">Eliminar</button>
+                                        </div>
+                                    </div>
+                                    <div class="question-meta">
+                                        <span class="chip chip-muted"><?= e($questionTypes[$question['question_type']] ?? $question['question_type']) ?></span>
+                                        <span class="chip chip-muted"><?= $question['is_required'] ? 'Obligatoria' : 'Opcional' ?></span>
+                                        <span class="chip chip-muted">Orden <?= (int) $question['sort_order'] ?></span>
+                                        <?php if ($question['visibility_rules'] !== []): ?>
+                                            <span class="chip chip-warning">Condicional</span>
+                                        <?php endif; ?>
+                                    </div>
+                                    <?php if ($question['options'] !== []): ?>
+                                        <div class="question-meta">
+                                            <?php foreach (array_slice($question['options'], 0, 4) as $option): ?>
+                                                <span class="chip chip-muted"><?= e($option['label']) ?></span>
+                                            <?php endforeach; ?>
+                                            <?php if (count($question['options']) > 4): ?>
+                                                <span class="chip chip-muted">+<?= count($question['options']) - 4 ?> opciones</span>
+                                            <?php endif; ?>
+                                        </div>
                                     <?php endif; ?>
-                                </div>
-                            <?php endif; ?>
-                        </article>
+                                </article>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </section>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+    <?php if ($survey['sections'] !== []): ?>
+        <aside class="editor-sidebar">
+            <div class="panel editor-side-panel">
+                <div class="panel-header">
+                    <div>
+                        <h2>Mapa de secciones</h2>
+                        <p>Salte entre bloques y revise su peso dentro del instrumento.</p>
+                    </div>
+                </div>
+                <nav class="section-nav">
+                    <?php foreach ($sectionSummaries as $index => $sectionSummary): ?>
+                        <a class="section-nav-link" href="#section-<?= $sectionSummary['id'] ?>">
+                            <span class="section-nav-order"><?= $index + 1 ?></span>
+                            <span class="section-nav-copy">
+                                <strong><?= e($sectionSummary['title']) ?></strong>
+                                <small><?= $sectionSummary['question_count'] ?> preguntas · <?= $sectionSummary['required_count'] ?> obligatorias<?= $sectionSummary['conditional_count'] > 0 ? ' · ' . $sectionSummary['conditional_count'] . ' condicionales' : '' ?></small>
+                            </span>
+                        </a>
                     <?php endforeach; ?>
-                <?php endif; ?>
+                </nav>
             </div>
-        </section>
-    <?php endforeach; ?>
-<?php endif; ?>
+            <div class="panel panel-muted editor-side-panel">
+                <div class="stack">
+                    <div>
+                        <strong>Flujo sugerido</strong>
+                        <p>Primero valide el orden de secciones, luego revise preguntas condicionales y finalmente haga una prueba en el formulario público.</p>
+                    </div>
+                    <div class="actions-inline">
+                        <button class="btn btn-secondary" type="button" data-open-modal="importModal">Carga masiva</button>
+                        <a class="btn btn-link" target="_blank" rel="noreferrer" href="<?= url('public/index.php?survey=' . urlencode($survey['slug'])) ?>">Probar encuesta</a>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    <?php endif; ?>
+</div>
 
 <div class="modal" id="sectionModal">
     <div class="modal-dialog">
@@ -324,9 +471,101 @@ function updateQuestionTypeFields() {
     document.getElementById('matrixField').style.display = type === 'matrix' ? 'grid' : 'none';
 }
 
+function syncSectionToggleButton(button, body) {
+    if (!button || !body) {
+        return;
+    }
+
+    button.textContent = body.hidden ? 'Expandir' : 'Contraer';
+}
+
+function setSectionsCollapsed(collapsed) {
+    document.querySelectorAll('[data-section-body]').forEach((body) => {
+        body.hidden = collapsed;
+    });
+
+    document.querySelectorAll('.js-toggle-section').forEach((button) => {
+        const body = document.getElementById(button.dataset.sectionToggle || '');
+        syncSectionToggleButton(button, body);
+    });
+}
+
+function filterEditorQuestions() {
+    const searchValue = (document.getElementById('questionSearchInput')?.value || '').trim().toLowerCase();
+    const typeValue = document.getElementById('questionTypeFilter')?.value || 'all';
+    const conditionalOnly = !!document.getElementById('conditionalOnlyToggle')?.checked;
+    const hasActiveFilter = searchValue !== '' || typeValue !== 'all' || conditionalOnly;
+    let visibleQuestions = 0;
+    let visibleSections = 0;
+
+    document.querySelectorAll('[data-section-card]').forEach((sectionCard) => {
+        const body = sectionCard.querySelector('[data-section-body]');
+        const items = Array.from(sectionCard.querySelectorAll('[data-question-item]'));
+        let matchesInSection = 0;
+
+        items.forEach((item) => {
+            const haystack = item.dataset.questionSearch || '';
+            const matchesSearch = searchValue === '' || haystack.includes(searchValue);
+            const matchesType = typeValue === 'all' || item.dataset.questionType === typeValue;
+            const matchesConditional = !conditionalOnly || item.dataset.questionConditional === '1';
+            const visible = matchesSearch && matchesType && matchesConditional;
+            item.hidden = !visible;
+
+            if (visible) {
+                matchesInSection += 1;
+            }
+        });
+
+        const sectionVisible = matchesInSection > 0 || (!hasActiveFilter && items.length === 0);
+        sectionCard.hidden = !sectionVisible;
+        if (sectionVisible) {
+            visibleSections += 1;
+        }
+
+        if (matchesInSection > 0) {
+            visibleQuestions += matchesInSection;
+
+            if (hasActiveFilter && body) {
+                body.hidden = false;
+            }
+        }
+
+        sectionCard.querySelectorAll('.js-toggle-section').forEach((button) => {
+            syncSectionToggleButton(button, body);
+        });
+    });
+
+    const meta = document.getElementById('editorResultsMeta');
+    if (meta) {
+        meta.innerHTML = `Mostrando <strong>${visibleQuestions}</strong> preguntas en <strong>${visibleSections}</strong> secciones.`;
+    }
+
+    const emptyState = document.getElementById('editorFilterEmptyState');
+    if (emptyState) {
+        emptyState.style.display = hasActiveFilter && visibleQuestions === 0 ? 'block' : 'none';
+    }
+}
+
 document.getElementById('newSectionButton').addEventListener('click', resetSectionForm);
 document.getElementById('question_type').addEventListener('change', updateQuestionTypeFields);
+document.getElementById('expandSectionsButton')?.addEventListener('click', () => setSectionsCollapsed(false));
+document.getElementById('collapseSectionsButton')?.addEventListener('click', () => setSectionsCollapsed(true));
+document.getElementById('questionSearchInput')?.addEventListener('input', filterEditorQuestions);
+document.getElementById('questionTypeFilter')?.addEventListener('change', filterEditorQuestions);
+document.getElementById('conditionalOnlyToggle')?.addEventListener('change', filterEditorQuestions);
 updateQuestionTypeFields();
+
+document.querySelectorAll('.js-toggle-section').forEach((button) => {
+    button.addEventListener('click', () => {
+        const body = document.getElementById(button.dataset.sectionToggle || '');
+        if (!body) {
+            return;
+        }
+
+        body.hidden = !body.hidden;
+        syncSectionToggleButton(button, body);
+    });
+});
 
 document.querySelectorAll('.js-edit-section').forEach((button) => {
     button.addEventListener('click', () => {
@@ -496,5 +735,7 @@ document.querySelectorAll('.js-delete-question').forEach((button) => {
         window.location.reload();
     });
 });
+
+filterEditorQuestions();
 </script>
 <?php require TEMPLATES_PATH . '/admin_footer.php'; ?>

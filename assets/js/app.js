@@ -8,24 +8,63 @@ window.ShalomApp = {
 
         document.querySelectorAll('[data-open-modal]').forEach((trigger) => {
             trigger.addEventListener('click', () => {
-                const target = document.getElementById(trigger.dataset.openModal);
-                target?.classList.add('open');
+                this.openModal(trigger.dataset.openModal);
             });
         });
 
         document.querySelectorAll('[data-close-modal]').forEach((trigger) => {
             trigger.addEventListener('click', () => {
-                trigger.closest('.modal')?.classList.remove('open');
+                this.closeModal(trigger.closest('.modal'));
             });
         });
 
         document.querySelectorAll('.modal').forEach((modal) => {
             modal.addEventListener('click', (event) => {
                 if (event.target === modal) {
-                    modal.classList.remove('open');
+                    this.closeModal(modal);
                 }
             });
         });
+
+        window.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape') {
+                return;
+            }
+
+            const openModals = Array.from(document.querySelectorAll('.modal.open'));
+            const activeModal = openModals[openModals.length - 1];
+            if (!activeModal) {
+                return;
+            }
+
+            this.closeModal(activeModal);
+        });
+    },
+
+    openModal(target) {
+        const modal = typeof target === 'string' ? document.getElementById(target) : target;
+        if (!modal) {
+            return;
+        }
+
+        modal.classList.add('open');
+        document.body.classList.add('modal-open');
+        const focusTarget = modal.querySelector('[data-modal-autofocus], input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])');
+        window.requestAnimationFrame(() => {
+            focusTarget?.focus({preventScroll: true});
+        });
+    },
+
+    closeModal(target) {
+        const modal = typeof target === 'string' ? document.getElementById(target) : target;
+        if (!modal) {
+            return;
+        }
+
+        modal.classList.remove('open');
+        if (!document.querySelector('.modal.open')) {
+            document.body.classList.remove('modal-open');
+        }
     },
 
     ensureToastRegion() {
@@ -135,7 +174,7 @@ window.ShalomApp = {
 
             const cleanup = (value) => {
                 window.removeEventListener('keydown', onKeyDown);
-                modal.classList.remove('open');
+                this.closeModal(modal);
                 window.setTimeout(() => modal.remove(), 160);
                 resolve(value);
             };
@@ -159,6 +198,7 @@ window.ShalomApp = {
             modal.querySelector('[data-confirm-accept]')?.addEventListener('click', () => cleanup(true));
 
             document.body.appendChild(modal);
+            document.body.classList.add('modal-open');
             window.addEventListener('keydown', onKeyDown);
             modal.querySelector('[data-confirm-autofocus]')?.focus();
         });

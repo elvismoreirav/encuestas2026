@@ -7,6 +7,24 @@ $authUser = auth()->user();
 $canManageSurveys = auth()->canManageSurveys();
 $canAccessInsights = auth()->canAccessInsights();
 $canManageUsers = auth()->canManageUsers();
+$workspaceLinks = [
+    ['key' => 'dashboard', 'label' => 'Dashboard', 'icon' => 'layout-dashboard', 'url' => url('dashboard.php')],
+];
+
+if ($canManageSurveys) {
+    $workspaceLinks[] = ['key' => 'surveys', 'label' => 'Encuestas', 'icon' => 'clipboard-list', 'url' => url('encuestas/index.php')];
+}
+
+if ($canAccessInsights) {
+    $workspaceLinks[] = ['key' => 'responses', 'label' => 'Respuestas', 'icon' => 'messages-square', 'url' => url('respuestas/index.php')];
+    $workspaceLinks[] = ['key' => 'reports', 'label' => 'Reportes', 'icon' => 'chart-column-big', 'url' => url('reportes/index.php')];
+}
+
+if ($canManageUsers) {
+    $workspaceLinks[] = ['key' => 'users', 'label' => 'Usuarios', 'icon' => 'users-round', 'url' => url('usuarios/index.php')];
+}
+
+$workspaceLinks[] = ['key' => 'public-form', 'label' => 'Formulario público', 'icon' => 'external-link', 'url' => url('public/index.php')];
 ?>
 <!doctype html>
 <html lang="es">
@@ -25,7 +43,7 @@ $canManageUsers = auth()->canManageUsers();
     <script defer src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
     <script defer src="<?= asset('js/app.js') ?>"></script>
 </head>
-<body class="app-shell">
+<body class="app-shell admin-body page-<?= e($currentPage !== '' ? $currentPage : 'admin') ?>">
 <div class="admin-layout">
     <aside class="sidebar">
         <div class="sidebar-brand">
@@ -61,6 +79,10 @@ $canManageUsers = auth()->canManageUsers();
                 <i data-lucide="external-link"></i><span>Formulario público</span>
             </a>
         </nav>
+        <div class="sidebar-support">
+            <span class="chip chip-outline-light">Centro operativo</span>
+            <p>Use los accesos rápidos del panel para cambiar de módulo sin perder contexto.</p>
+        </div>
         <div class="sidebar-footer">
             <span><?= e($authUser['full_name'] ?? 'Administrador') ?></span>
             <small><?= e(Helpers::userRoleLabel((string) ($authUser['role'] ?? 'editor'))) ?></small>
@@ -70,7 +92,8 @@ $canManageUsers = auth()->canManageUsers();
 
     <main class="main-panel">
         <header class="topbar">
-            <div>
+            <div class="topbar-copy">
+                <span class="topbar-eyebrow">Panel administrativo</span>
                 <div class="breadcrumbs">
                     <a href="<?= url('dashboard.php') ?>">Inicio</a>
                     <?php foreach ($breadcrumbs as $breadcrumb): ?>
@@ -92,6 +115,22 @@ $canManageUsers = auth()->canManageUsers();
                 <span class="chip chip-muted"><?= date('d/m/Y H:i') ?></span>
             </div>
         </header>
+        <nav class="workspace-bar" aria-label="Accesos rápidos del panel">
+            <?php foreach ($workspaceLinks as $workspaceLink): ?>
+                <?php
+                $isExternal = $workspaceLink['key'] === 'public-form';
+                $isActive = $workspaceLink['key'] === $currentPage;
+                ?>
+                <a
+                    class="workspace-link <?= $isActive ? 'active' : '' ?>"
+                    href="<?= e($workspaceLink['url']) ?>"
+                    <?= $isExternal ? 'target="_blank" rel="noreferrer"' : '' ?>
+                >
+                    <i data-lucide="<?= e($workspaceLink['icon']) ?>"></i>
+                    <span><?= e($workspaceLink['label']) ?></span>
+                </a>
+            <?php endforeach; ?>
+        </nav>
 
         <section class="page-content">
             <?php if ($message = flash('success')): ?>

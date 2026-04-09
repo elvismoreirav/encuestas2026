@@ -53,6 +53,41 @@ require TEMPLATES_PATH . '/admin_header.php';
     </div>
 </section>
 
+<section class="panel panel-muted">
+    <div class="panel-header">
+        <div>
+            <h2>Buscar y filtrar</h2>
+            <p>Encuentre cuentas por nombre, correo, rol, estado o encuestas asignadas.</p>
+        </div>
+    </div>
+    <div class="admin-toolbar">
+        <div class="field">
+            <label for="userSearchInput">Buscar usuario</label>
+            <input type="search" id="userSearchInput" placeholder="Nombre, correo o encuesta asignada">
+        </div>
+        <div class="field">
+            <label for="userRoleFilter">Rol</label>
+            <select id="userRoleFilter">
+                <option value="all">Todos</option>
+                <?php foreach ($roleOptions as $role): ?>
+                    <option value="<?= e($role['value']) ?>"><?= e($role['label']) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <div class="field">
+            <label for="userStatusFilter">Estado</label>
+            <select id="userStatusFilter">
+                <option value="all">Todos</option>
+                <option value="active">Activo</option>
+                <option value="inactive">Inactivo</option>
+            </select>
+        </div>
+        <div class="toolbar-meta" id="userResultsMeta">
+            Mostrando <strong><?= (int) count($userList) ?></strong> usuarios en la vista actual.
+        </div>
+    </div>
+</section>
+
 <section class="panel">
     <div class="panel-header">
         <div>
@@ -65,7 +100,22 @@ require TEMPLATES_PATH . '/admin_header.php';
     <?php else: ?>
         <div class="survey-grid">
             <?php foreach ($userList as $user): ?>
-                <article class="survey-card user-card">
+                <?php
+                $assignedSurveyNames = implode(' ', array_map(static fn(array $assignment): string => (string) ($assignment['survey_name'] ?? ''), $user['assigned_surveys'] ?? []));
+                $userSearchText = strtolower(trim(implode(' ', array_filter([
+                    $user['full_name'] ?? '',
+                    $user['email'] ?? '',
+                    $user['role_label'] ?? '',
+                    $user['status_label'] ?? '',
+                    $assignedSurveyNames,
+                ]))));
+                ?>
+                <article
+                    class="survey-card user-card js-user-card"
+                    data-user-search="<?= e($userSearchText) ?>"
+                    data-user-role="<?= e($user['role']) ?>"
+                    data-user-status="<?= e($user['status']) ?>"
+                >
                     <div class="actions-inline" style="justify-content:space-between; align-items:flex-start;">
                         <div>
                             <span class="chip chip-muted"><?= e($user['role_label']) ?></span>
@@ -103,6 +153,7 @@ require TEMPLATES_PATH . '/admin_header.php';
                 </article>
             <?php endforeach; ?>
         </div>
+        <div id="userFilterEmptyState" class="empty-state" style="display:none; margin-top:18px;">No hay usuarios que coincidan con los filtros aplicados.</div>
     <?php endif; ?>
 </section>
 
@@ -124,9 +175,23 @@ require TEMPLATES_PATH . '/admin_header.php';
                 <th>Último ingreso</th>
             </tr>
             </thead>
-            <tbody>
+            <tbody id="userTableBody">
             <?php foreach ($userList as $user): ?>
-                <tr>
+                <?php
+                $assignedSurveyNames = implode(' ', array_map(static fn(array $assignment): string => (string) ($assignment['survey_name'] ?? ''), $user['assigned_surveys'] ?? []));
+                $userSearchText = strtolower(trim(implode(' ', array_filter([
+                    $user['full_name'] ?? '',
+                    $user['email'] ?? '',
+                    $user['role_label'] ?? '',
+                    $user['status_label'] ?? '',
+                    $assignedSurveyNames,
+                ]))));
+                ?>
+                <tr
+                    data-user-search="<?= e($userSearchText) ?>"
+                    data-user-role="<?= e($user['role']) ?>"
+                    data-user-status="<?= e($user['status']) ?>"
+                >
                     <td>
                         <strong><?= e($user['full_name']) ?></strong><br>
                         <small><?= e($user['email']) ?></small>
@@ -252,6 +317,41 @@ function updateRoleState() {
     });
 }
 
+function filterUsers() {
+    const searchValue = (document.getElementById('userSearchInput')?.value || '').trim().toLowerCase();
+    const roleValue = document.getElementById('userRoleFilter')?.value || 'all';
+    const statusValue = document.getElementById('userStatusFilter')?.value || 'all';
+    let visibleCount = 0;
+
+    document.querySelectorAll('.js-user-card').forEach((card) => {
+        const matchesSearch = searchValue === '' || (card.dataset.userSearch || '').includes(searchValue);
+        const matchesRole = roleValue === 'all' || card.dataset.userRole === roleValue;
+        const matchesStatus = statusValue === 'all' || card.dataset.userStatus === statusValue;
+        const visible = matchesSearch && matchesRole && matchesStatus;
+        card.hidden = !visible;
+        if (visible) {
+            visibleCount += 1;
+        }
+    });
+
+    document.querySelectorAll('#userTableBody tr').forEach((row) => {
+        const matchesSearch = searchValue === '' || (row.dataset.userSearch || '').includes(searchValue);
+        const matchesRole = roleValue === 'all' || row.dataset.userRole === roleValue;
+        const matchesStatus = statusValue === 'all' || row.dataset.userStatus === statusValue;
+        row.hidden = !(matchesSearch && matchesRole && matchesStatus);
+    });
+
+    const meta = document.getElementById('userResultsMeta');
+    if (meta) {
+        meta.innerHTML = `Mostrando <strong>${visibleCount}</strong> usuarios en la vista actual.`;
+    }
+
+    const emptyState = document.getElementById('userFilterEmptyState');
+    if (emptyState) {
+        emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
+    }
+}
+
 function resetUserForm() {
     userForm.reset();
     document.getElementById('user_id').value = '';
@@ -264,6 +364,9 @@ function resetUserForm() {
 
 document.getElementById('createUserButton').addEventListener('click', resetUserForm);
 document.getElementById('user_role').addEventListener('change', updateRoleState);
+document.getElementById('userSearchInput')?.addEventListener('input', filterUsers);
+document.getElementById('userRoleFilter')?.addEventListener('change', filterUsers);
+document.getElementById('userStatusFilter')?.addEventListener('change', filterUsers);
 
 document.querySelectorAll('.js-edit-user').forEach((button) => {
     button.addEventListener('click', () => {
@@ -353,5 +456,6 @@ document.querySelectorAll('.js-delete-user').forEach((button) => {
 });
 
 updateRoleState();
+filterUsers();
 </script>
 <?php require TEMPLATES_PATH . '/admin_footer.php'; ?>

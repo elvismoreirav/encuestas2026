@@ -45,6 +45,43 @@ require TEMPLATES_PATH . '/admin_header.php';
 <section class="panel">
     <div class="panel-header">
         <div>
+            <h2>Accesos de alta frecuencia</h2>
+            <p>Entre rápidamente a los módulos más usados del panel según su perfil actual.</p>
+        </div>
+    </div>
+    <div class="shortcut-grid">
+        <?php if ($canManageSurveys): ?>
+            <a class="shortcut-card" href="<?= url('encuestas/index.php') ?>">
+                <strong>Administrar encuestas</strong>
+                <p>Cree instrumentos, ajuste fechas y entre al editor estructural.</p>
+            </a>
+        <?php endif; ?>
+        <?php if ($canAccessInsights): ?>
+            <a class="shortcut-card" href="<?= url('respuestas/index.php') ?>">
+                <strong>Revisar respuestas</strong>
+                <p>Consulte capturas recientes, detalle por formulario y trazabilidad.</p>
+            </a>
+            <a class="shortcut-card" href="<?= url('reportes/index.php') ?>">
+                <strong>Analizar reportes</strong>
+                <p>Abra métricas, tendencias y gráficos comparativos por pregunta.</p>
+            </a>
+        <?php endif; ?>
+        <?php if (auth()->canManageUsers()): ?>
+            <a class="shortcut-card" href="<?= url('usuarios/index.php') ?>">
+                <strong>Gestionar usuarios</strong>
+                <p>Controle accesos, roles y asignaciones operativas por encuesta.</p>
+            </a>
+        <?php endif; ?>
+        <a class="shortcut-card" href="<?= url('public/index.php') ?>" target="_blank" rel="noreferrer">
+            <strong>Abrir formulario público</strong>
+            <p>Valide el flujo de captura y revise el instrumento desde la vista final.</p>
+        </a>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-header">
+        <div>
             <h2>Estado de encuestas</h2>
             <p>Control de fechas, estructura y volumen de respuestas.</p>
         </div>
