@@ -285,6 +285,12 @@ p {
     border: 1px solid rgba(30, 77, 57, 0.14);
 }
 
+.btn-compact {
+    padding: 10px 14px;
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
 .btn-danger {
     background: rgba(180, 35, 24, 0.08);
     color: var(--danger);
@@ -1454,7 +1460,14 @@ th {
     display: flex;
     gap: 8px;
     overflow: auto;
-    padding-bottom: 4px;
+    padding: 2px 2px 8px;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+}
+
+.survey-stepper::-webkit-scrollbar {
+    display: none;
 }
 
 .survey-step {
@@ -1465,6 +1478,17 @@ th {
     background: rgba(30, 77, 57, 0.06);
     color: var(--text-soft);
     border: 1px solid transparent;
+    position: relative;
+    overflow: hidden;
+    scroll-snap-align: start;
+}
+
+.survey-step::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0;
+    height: 4px;
+    background: rgba(30, 77, 57, 0.12);
 }
 
 .survey-step small {
@@ -1480,10 +1504,18 @@ th {
     border-color: rgba(30, 77, 57, 0.18);
 }
 
+.survey-step.active::after {
+    background: linear-gradient(90deg, var(--shalom-primary), var(--shalom-primary-light));
+}
+
 .survey-step.done {
     background: rgba(2, 122, 72, 0.08);
     color: var(--success);
     border-color: rgba(2, 122, 72, 0.14);
+}
+
+.survey-step.done::after {
+    background: rgba(2, 122, 72, 0.32);
 }
 
 .survey-form {
@@ -1502,12 +1534,26 @@ th {
 
 .section-banner {
     display: grid;
-    gap: 14px;
+    gap: 18px;
     padding: 22px 24px;
     border-radius: 24px;
     background: linear-gradient(135deg, rgba(30, 77, 57, 0.1), rgba(214, 194, 154, 0.16));
     border: 1px solid rgba(30, 77, 57, 0.12);
     box-shadow: var(--shadow);
+    position: relative;
+    overflow: hidden;
+}
+
+.section-banner::before {
+    content: "";
+    position: absolute;
+    width: 240px;
+    height: 240px;
+    top: -110px;
+    right: -70px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(214, 194, 154, 0.2), transparent 70%);
+    pointer-events: none;
 }
 
 .section-banner h2 {
@@ -1519,6 +1565,25 @@ th {
     color: var(--text-soft);
 }
 
+.section-banner-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.section-banner-jump {
+    align-self: flex-start;
+}
+
+.section-progress-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.95fr);
+    gap: 14px;
+    align-items: stretch;
+}
+
 .section-progress-panel {
     display: grid;
     gap: 12px;
@@ -1526,6 +1591,30 @@ th {
     border-radius: 20px;
     background: rgba(255, 255, 255, 0.66);
     border: 1px solid rgba(30, 77, 57, 0.1);
+}
+
+.section-progress-bars {
+    display: grid;
+    gap: 12px;
+}
+
+.section-progress-block {
+    display: grid;
+    gap: 8px;
+}
+
+.section-progress-label {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    font-size: 0.9rem;
+    color: var(--text-soft);
+}
+
+.section-progress-label strong {
+    font-size: 0.95rem;
+    color: var(--shalom-primary-dark);
 }
 
 .section-progress-summary,
@@ -1564,6 +1653,134 @@ th {
     height: 100%;
     border-radius: inherit;
     background: linear-gradient(135deg, var(--shalom-primary), var(--shalom-primary-light));
+}
+
+.section-progress-track-overall span {
+    background: linear-gradient(135deg, var(--shalom-gold), #b08c44);
+}
+
+.section-outline-card {
+    display: grid;
+    gap: 12px;
+    padding: 16px 18px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.76);
+    border: 1px solid rgba(30, 77, 57, 0.1);
+    min-width: 0;
+}
+
+.section-outline-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+.section-outline-head div {
+    display: grid;
+    gap: 4px;
+}
+
+.section-outline-head strong {
+    color: var(--shalom-primary-dark);
+    font-size: 1rem;
+}
+
+.section-outline-head span {
+    color: var(--text-soft);
+    font-size: 0.88rem;
+}
+
+.question-rail {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+    gap: 10px;
+    min-width: 0;
+}
+
+.question-pill {
+    border: 1px solid rgba(30, 77, 57, 0.1);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(243, 241, 234, 0.92));
+    border-radius: 18px;
+    padding: 12px 14px;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    cursor: pointer;
+    text-align: left;
+    min-width: 0;
+    transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+    scroll-snap-align: start;
+}
+
+.question-pill:hover {
+    transform: translateY(-1px);
+    border-color: rgba(30, 77, 57, 0.2);
+    box-shadow: 0 12px 22px rgba(17, 32, 25, 0.08);
+}
+
+.question-pill:focus-visible {
+    outline: none;
+    border-color: rgba(30, 77, 57, 0.28);
+    box-shadow: 0 0 0 4px rgba(30, 77, 57, 0.08);
+}
+
+.question-pill-number {
+    width: 38px;
+    height: 38px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: rgba(30, 77, 57, 0.08);
+    color: var(--shalom-primary-dark);
+    font-weight: 800;
+}
+
+.question-pill-copy {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.question-pill-text {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.question-pill-state {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-soft);
+}
+
+.question-pill.is-complete {
+    border-color: rgba(2, 122, 72, 0.2);
+    background: linear-gradient(180deg, rgba(236, 250, 243, 0.95), rgba(255, 255, 255, 0.96));
+}
+
+.question-pill.is-complete .question-pill-number {
+    background: rgba(2, 122, 72, 0.12);
+    color: var(--success);
+}
+
+.question-pill.is-pending {
+    border-color: rgba(181, 71, 8, 0.14);
+}
+
+.question-pill.is-pending .question-pill-number {
+    background: rgba(181, 71, 8, 0.12);
+    color: var(--warning);
+}
+
+.question-pill.is-optional .question-pill-number {
+    background: rgba(30, 77, 57, 0.06);
 }
 
 .form-alert {
@@ -1672,6 +1889,20 @@ th {
     padding: 22px;
     box-shadow: var(--shadow);
     animation: rise 320ms ease;
+    position: relative;
+    overflow: hidden;
+    scroll-margin-top: 18px;
+    scroll-margin-bottom: 128px;
+}
+
+.question-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, rgba(30, 77, 57, 0.12), rgba(214, 194, 154, 0.2));
 }
 
 .question-card h3 {
@@ -1688,9 +1919,17 @@ th {
     box-shadow: 0 20px 42px rgba(2, 122, 72, 0.08);
 }
 
+.question-card.is-complete::before {
+    background: linear-gradient(90deg, rgba(2, 122, 72, 0.78), rgba(54, 179, 126, 0.34));
+}
+
 .question-card.is-invalid {
     border-color: rgba(180, 35, 24, 0.3);
     box-shadow: 0 22px 46px rgba(180, 35, 24, 0.08);
+}
+
+.question-card.is-invalid::before {
+    background: linear-gradient(90deg, rgba(180, 35, 24, 0.82), rgba(255, 188, 188, 0.5));
 }
 
 .question-head {
@@ -1708,6 +1947,35 @@ th {
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--shalom-primary);
+}
+
+.question-title-stack {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.question-support {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.question-support-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 999px;
+    background: rgba(30, 77, 57, 0.06);
+    color: var(--shalom-primary-dark);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.question-help-text {
+    margin: 0;
+    color: var(--text-soft);
 }
 
 .question-badges {
@@ -1879,6 +2147,17 @@ th {
 .rating-card {
     min-height: 132px;
     align-items: center;
+    border-color: color-mix(in srgb, var(--rating-accent, var(--shalom-primary)) 18%, rgba(30, 77, 57, 0.08));
+}
+
+.rating-card .rating-scale {
+    background: color-mix(in srgb, var(--rating-accent, var(--shalom-primary)) 16%, white);
+    color: color-mix(in srgb, var(--rating-accent, var(--shalom-primary)) 78%, #102018);
+}
+
+.rating-card:has(.choice-input:checked) {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--rating-accent, var(--shalom-primary)) 18%, white), rgba(255, 255, 255, 0.96));
+    border-color: color-mix(in srgb, var(--rating-accent, var(--shalom-primary)) 42%, rgba(30, 77, 57, 0.14));
 }
 
 .rating-scale {
@@ -2201,9 +2480,17 @@ th {
     .matrix-cell-label {
         display: block;
     }
+
+    .section-progress-layout {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 768px) {
+    .survey-form {
+        padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 112px);
+    }
+
     .main-panel {
         padding: 18px;
     }
@@ -2294,9 +2581,15 @@ th {
         grid-template-columns: 1fr;
     }
 
+    .section-banner {
+        padding: 18px;
+    }
+
     .section-progress-summary,
     .section-progress-meta,
-    .form-actions-summary {
+    .form-actions-summary,
+    .section-banner-head,
+    .section-outline-head {
         flex-direction: column;
     }
 
@@ -2313,9 +2606,41 @@ th {
         justify-content: flex-start;
     }
 
+    .question-support {
+        gap: 6px;
+    }
+
+    .question-support-item {
+        width: 100%;
+        justify-content: center;
+    }
+
     .choice-card,
     .rating-card {
         min-height: auto;
+    }
+
+    .question-rail {
+        grid-template-columns: none;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(210px, 1fr);
+        overflow-x: auto;
+        padding-bottom: 4px;
+        scrollbar-width: none;
+        scroll-snap-type: x proximity;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .question-rail::-webkit-scrollbar {
+        display: none;
+    }
+
+    .form-actions-shell {
+        position: sticky;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+        z-index: 24;
+        backdrop-filter: blur(16px);
+        background: rgba(255, 255, 255, 0.94);
     }
 
     .form-actions .btn {

@@ -434,6 +434,15 @@ function questionDisplayLabel(code) {
     return order ? String(order) : code;
 }
 
+function shortText(value, limit = 52) {
+    const normalized = String(value ?? '').trim();
+    if (normalized.length <= limit) {
+        return normalized;
+    }
+
+    return `${normalized.slice(0, Math.max(limit - 1, 1)).trimEnd()}…`;
+}
+
 function buildMissingQuestionDetails(codes) {
     return codes.map((code) => questionTitle(code));
 }
@@ -489,10 +498,104 @@ function getOverallProgress(sections) {
     };
 }
 
+function getFirstPendingQuestion(section, requiredOnly = false) {
+    const questions = requiredOnly
+        ? section.questions.filter((question) => question.is_required)
+        : section.questions;
+
+    return questions.find((question) => !questionHasAnswer(question)) || null;
+}
+
+function getQuestionInteractionHint(question) {
+    if (question.question_type === 'rating') {
+        return 'Seleccione una valoración';
+    }
+
+    if (question.question_type === 'multiple_choice') {
+        return 'Puede marcar varias opciones';
+    }
+
+    if (question.question_type === 'single_choice') {
+        return 'Seleccione una sola opción';
+    }
+
+    if (question.question_type === 'matrix') {
+        const rows = question.settings?.matrix?.rows || [];
+        return rows.length ? `Complete ${rows.length} filas` : 'Complete la matriz';
+    }
+
+    if (question.question_type === 'textarea') {
+        return 'Escriba una respuesta breve';
+    }
+
+    return 'Ingrese su respuesta';
+}
+
+function getQuestionStructureHint(question) {
+    if (question.question_type === 'matrix') {
+        const dimensions = question.settings?.matrix?.dimensions || [];
+        return dimensions.length ? `${dimensions.length} columnas de evaluación` : 'Formato matricial';
+    }
+
+    if (Array.isArray(question.options) && question.options.length) {
+        return `${question.options.length} opciones disponibles`;
+    }
+
+    return question.is_required ? 'Respuesta requerida' : 'Puede dejarla para después';
+}
+
+function renderSectionQuestionRail(section) {
+    const firstPendingRequired = getFirstPendingQuestion(section, true);
+
+    return `
+        <aside class="section-outline-card" aria-label="Mapa rápido de preguntas de la sección">
+            <div class="section-outline-head">
+                <div>
+                    <strong>Mapa rápido</strong>
+                    <span>${section.questions.length} preguntas visibles</span>
+                </div>
+                ${firstPendingRequired ? `
+                    <button
+                        class="btn btn-secondary btn-compact"
+                        type="button"
+                        data-question-jump="${escapeHtml(firstPendingRequired.code)}"
+                    >
+                        Ir a pendiente
+                    </button>
+                ` : ''}
+            </div>
+            <div class="question-rail">
+                ${section.questions.map((question) => {
+                    const complete = questionHasAnswer(question);
+                    const stateClass = complete ? 'is-complete' : (question.is_required ? 'is-pending' : 'is-optional');
+                    const stateLabel = complete ? 'Respondida' : (question.is_required ? 'Pendiente' : 'Opcional');
+
+                    return `
+                        <button
+                            class="question-pill ${stateClass}"
+                            type="button"
+                            data-question-jump="${escapeHtml(question.code)}"
+                            title="${escapeHtml(question.prompt)}"
+                            aria-label="Ir a la pregunta ${escapeHtml(questionDisplayLabel(question.code))}: ${escapeHtml(question.prompt)}"
+                        >
+                            <span class="question-pill-number">${escapeHtml(questionDisplayLabel(question.code))}</span>
+                            <span class="question-pill-copy">
+                                <span class="question-pill-text">${escapeHtml(shortText(question.prompt, 44))}</span>
+                                <span class="question-pill-state">${escapeHtml(stateLabel)}</span>
+                            </span>
+                        </button>
+                    `;
+                }).join('')}
+            </div>
+        </aside>
+    `;
+}
+
 function renderSectionBanner(section, sections) {
     const sectionProgress = getSectionProgress(section);
     const overallProgress = getOverallProgress(sections);
     const pendingRequired = Math.max(sectionProgress.requiredTotal - sectionProgress.requiredAnswered, 0);
+    const firstPendingQuestion = getFirstPendingQuestion(section);
     const draftLabel = lastDraftSavedAt
         ? `${draftWasRestored ? 'Progreso recuperado' : 'Guardado local'} ${formatSavedAt(lastDraftSavedAt)}`
         : 'Guardado local disponible';
@@ -507,28 +610,59 @@ function renderSectionBanner(section, sections) {
                 </span>
                 <span class="chip chip-muted">${draftLabel}</span>
             </div>
-            <div>
-                <h2>${escapeHtml(section.title)}</h2>
-                <p>${escapeHtml(section.description || 'Responda esta sección para continuar con el levantamiento.')}</p>
+            <div class="section-banner-head">
+                <div>
+                    <h2>${escapeHtml(section.title)}</h2>
+                    <p>${escapeHtml(section.description || 'Responda esta sección para continuar con el levantamiento.')}</p>
+                </div>
+                ${firstPendingQuestion ? `
+                    <button
+                        class="btn btn-secondary btn-compact section-banner-jump"
+                        type="button"
+                        data-question-jump="${escapeHtml(firstPendingQuestion.code)}"
+                    >
+                        Continuar en la siguiente pendiente
+                    </button>
+                ` : ''}
             </div>
-            <div class="section-progress-panel" aria-label="Progreso de la encuesta">
-                <div class="section-progress-summary">
-                    <div>
-                        <span>Sección actual</span>
-                        <strong>${sectionProgress.percent}%</strong>
+            <div class="section-progress-layout">
+                <div class="section-progress-panel" aria-label="Progreso de la encuesta">
+                    <div class="section-progress-summary">
+                        <div>
+                            <span>Sección actual</span>
+                            <strong>${sectionProgress.percent}%</strong>
+                        </div>
+                        <div>
+                            <span>Avance total</span>
+                            <strong>${overallProgress.percent}%</strong>
+                        </div>
                     </div>
-                    <div>
-                        <span>Avance total</span>
-                        <strong>${overallProgress.answered}/${overallProgress.total}</strong>
+                    <div class="section-progress-bars">
+                        <div class="section-progress-block">
+                            <div class="section-progress-label">
+                                <span>Sección</span>
+                                <strong>${sectionProgress.answered}/${sectionProgress.total}</strong>
+                            </div>
+                            <div class="section-progress-track" aria-hidden="true">
+                                <span style="width:${sectionProgress.percent}%"></span>
+                            </div>
+                        </div>
+                        <div class="section-progress-block">
+                            <div class="section-progress-label">
+                                <span>Total visible</span>
+                                <strong>${overallProgress.answered}/${overallProgress.total}</strong>
+                            </div>
+                            <div class="section-progress-track section-progress-track-overall" aria-hidden="true">
+                                <span style="width:${overallProgress.percent}%"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="section-progress-meta">
+                        <span>${sectionProgress.answered} de ${sectionProgress.total} preguntas respondidas</span>
+                        <span>${pendingRequired > 0 ? `${pendingRequired} obligatorias por completar` : 'Puede continuar a la siguiente sección'}</span>
                     </div>
                 </div>
-                <div class="section-progress-track" aria-hidden="true">
-                    <span style="width:${sectionProgress.percent}%"></span>
-                </div>
-                <div class="section-progress-meta">
-                    <span>${sectionProgress.answered} de ${sectionProgress.total} preguntas respondidas</span>
-                    <span>${pendingRequired > 0 ? `${pendingRequired} obligatorias por completar` : 'Puede continuar a la siguiente sección'}</span>
-                </div>
+                ${renderSectionQuestionRail(section)}
             </div>
         </section>
     `;
@@ -634,6 +768,7 @@ function renderChoiceCard(question, option, config = {}) {
     const type = config.type || 'radio';
     const selected = !!config.selected;
     const classes = ['choice-card'];
+    const ratingAccents = ['#027a48', '#2a6b4f', '#8b7b52', '#b54708', '#b42318'];
 
     if (type === 'checkbox') {
         classes.push('checkbox-card');
@@ -644,7 +779,7 @@ function renderChoiceCard(question, option, config = {}) {
     }
 
     return `
-        <label class="${classes.join(' ')}">
+        <label class="${classes.join(' ')}" ${config.variant === 'rating' ? `style="--rating-accent:${ratingAccents[config.index] || '#1e4d39'};"` : ''}>
             <input
                 class="choice-input"
                 type="${type}"
@@ -665,8 +800,9 @@ function renderChoiceCard(question, option, config = {}) {
 
 function renderSingleChoice(question) {
     const containerClass = question.question_type === 'rating' ? 'rating-grid' : 'option-grid columns-2';
+    const role = question.question_type === 'rating' || question.question_type === 'single_choice' ? 'radiogroup' : 'group';
     return `
-        <div class="${containerClass}">
+        <div class="${containerClass}" role="${role}" aria-label="${escapeHtml(question.prompt)}">
             ${question.options.map((option, index) => `
                 ${renderChoiceCard(question, option, {
                     selected: answers[question.code] === option.code,
@@ -681,7 +817,7 @@ function renderSingleChoice(question) {
 function renderMultipleChoice(question) {
     const current = Array.isArray(answers[question.code]) ? answers[question.code] : [];
     return `
-        <div class="option-grid columns-2">
+        <div class="option-grid columns-2" role="group" aria-label="${escapeHtml(question.prompt)}">
             ${question.options.map((option) => `
                 ${renderChoiceCard(question, option, {
                     type: 'checkbox',
@@ -748,6 +884,8 @@ function renderQuestion(question) {
     let body = '';
     const isInvalid = invalidQuestions.has(question.code);
     const isComplete = questionHasAnswer(question);
+    const guidance = getQuestionInteractionHint(question);
+    const structureHint = getQuestionStructureHint(question);
 
     if (question.question_type === 'single_choice' || question.question_type === 'rating') {
         body = renderSingleChoice(question);
@@ -768,10 +906,14 @@ function renderQuestion(question) {
     return `
         <article class="question-card ${isInvalid ? 'is-invalid' : ''} ${isComplete ? 'is-complete' : ''}" data-question="${question.code}">
             <div class="question-head">
-                <div>
-                    <div class="question-kicker">${escapeHtml(questionDisplayLabel(question.code))}</div>
+                <div class="question-title-stack">
+                    <div class="question-kicker">Pregunta ${escapeHtml(questionDisplayLabel(question.code))}</div>
                     <h3>${escapeHtml(question.prompt)}</h3>
-                    ${question.help_text ? `<p>${escapeHtml(question.help_text)}</p>` : ''}
+                    <div class="question-support">
+                        <span class="question-support-item">${escapeHtml(guidance)}</span>
+                        <span class="question-support-item">${escapeHtml(structureHint)}</span>
+                    </div>
+                    ${question.help_text ? `<p class="question-help-text">${escapeHtml(question.help_text)}</p>` : ''}
                 </div>
                 <div class="question-badges">
                     <span class="question-status ${isComplete ? 'question-status-complete' : 'question-status-pending'}">
@@ -854,7 +996,7 @@ function renderForm(options = {}) {
 
     surveyApp.innerHTML = `
         <form class="survey-form" id="publicSurveyForm" aria-busy="${isSubmitting ? 'true' : 'false'}">
-            <div id="surveyMessage">${renderFormMessage()}</div>
+            <div id="surveyMessage" aria-live="polite">${renderFormMessage()}</div>
             ${renderSectionBanner(section, sections)}
             ${section.questions.map((question) => renderQuestion(question)).join('')}
             <div class="form-actions-shell">
@@ -883,6 +1025,25 @@ function renderForm(options = {}) {
 
 function bindFormEvents(section) {
     const form = document.getElementById('publicSurveyForm');
+
+    form.querySelectorAll('[data-question-jump]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const questionCode = button.dataset.questionJump || '';
+            if (!questionCode) {
+                return;
+            }
+
+            const card = getQuestionCard(questionCode);
+            if (!card) {
+                return;
+            }
+
+            card.scrollIntoView({behavior: 'smooth', block: 'center'});
+            window.requestAnimationFrame(() => {
+                card.querySelector('input, textarea, select')?.focus({preventScroll: true});
+            });
+        });
+    });
 
     form.querySelectorAll('input[type="radio"]:not([data-matrix-question])').forEach((input) => {
         input.addEventListener('change', () => {
