@@ -136,6 +136,7 @@ const surveyData = <?= json_encode($selectedSurvey, JSON_UNESCAPED_UNICODE | JSO
 const surveyApp = document.getElementById('surveyApp');
 const surveyStepper = document.getElementById('surveyStepper');
 const questionLookup = Object.fromEntries((surveyData.questions_flat || []).map((question) => [question.code, question]));
+const questionDisplayOrder = Object.fromEntries((surveyData.questions_flat || []).map((question, index) => [question.code, index + 1]));
 const visibilityDrivers = new Set(
     (surveyData.questions_flat || []).flatMap((question) =>
         (Array.isArray(question.visibility_rules) ? question.visibility_rules : []).map((rule) => rule.question_code)
@@ -425,7 +426,12 @@ function questionTitle(code) {
         return code;
     }
 
-    return `${question.code}. ${question.prompt}`;
+    return `${questionDisplayLabel(question.code)}. ${question.prompt}`;
+}
+
+function questionDisplayLabel(code) {
+    const order = questionDisplayOrder[code];
+    return order ? String(order) : code;
 }
 
 function buildMissingQuestionDetails(codes) {
@@ -528,7 +534,55 @@ function renderSectionBanner(section, sections) {
     `;
 }
 
-function renderStepper(sections) {
+function getQuestionCard(questionCode) {
+    if (!questionCode) {
+        return null;
+    }
+
+    if (window.CSS?.escape) {
+        return document.querySelector(`[data-question="${window.CSS.escape(questionCode)}"]`);
+    }
+
+    return Array.from(document.querySelectorAll('[data-question]')).find((element) => element.dataset.question === questionCode) || null;
+}
+
+function captureQuestionViewport(questionCode) {
+    const card = getQuestionCard(questionCode);
+    if (!card) {
+        return null;
+    }
+
+    return {
+        questionCode,
+        top: card.getBoundingClientRect().top,
+    };
+}
+
+function restoreQuestionViewport(snapshot) {
+    if (!snapshot) {
+        return;
+    }
+
+    window.requestAnimationFrame(() => {
+        const card = getQuestionCard(snapshot.questionCode);
+        if (!card) {
+            return;
+        }
+
+        const top = card.getBoundingClientRect().top;
+        const offset = top - snapshot.top;
+        if (Math.abs(offset) < 2) {
+            return;
+        }
+
+        window.scrollTo({
+            top: Math.max(window.scrollY + offset, 0),
+            behavior: 'auto',
+        });
+    });
+}
+
+function renderStepper(sections, options = {}) {
     surveyStepper.innerHTML = sections.map((section, index) => `
         <div class="survey-step ${index === currentStep ? 'active' : ''} ${getSectionProgress(section).percent === 100 ? 'done' : ''}">
             <strong>Paso ${index + 1}</strong><br>
@@ -537,11 +591,24 @@ function renderStepper(sections) {
         </div>
     `).join('');
 
+    if (!options.alignActiveStep) {
+        return;
+    }
+
     window.requestAnimationFrame(() => {
-        surveyStepper.querySelector('.survey-step.active')?.scrollIntoView({
+        const activeStep = surveyStepper.querySelector('.survey-step.active');
+        if (!activeStep) {
+            return;
+        }
+
+        const containerRect = surveyStepper.getBoundingClientRect();
+        const stepRect = activeStep.getBoundingClientRect();
+        const maxLeft = Math.max(surveyStepper.scrollWidth - surveyStepper.clientWidth, 0);
+        const targetLeft = surveyStepper.scrollLeft + (stepRect.left - containerRect.left) - ((containerRect.width - stepRect.width) / 2);
+
+        surveyStepper.scrollTo({
+            left: Math.min(Math.max(targetLeft, 0), maxLeft),
             behavior: 'smooth',
-            block: 'nearest',
-            inline: 'center',
         });
     });
 }
@@ -553,7 +620,7 @@ function clearQuestionState(questionCode) {
 
     invalidQuestions.delete(questionCode);
     delete questionErrors[questionCode];
-    const card = document.querySelector(`[data-question="${questionCode}"]`);
+    const card = getQuestionCard(questionCode);
     card?.classList.remove('is-invalid');
     card?.querySelector('.question-error')?.remove();
 
@@ -702,7 +769,7 @@ function renderQuestion(question) {
         <article class="question-card ${isInvalid ? 'is-invalid' : ''} ${isComplete ? 'is-complete' : ''}" data-question="${question.code}">
             <div class="question-head">
                 <div>
-                    <div class="question-kicker">${escapeHtml(question.code)}</div>
+                    <div class="question-kicker">${escapeHtml(questionDisplayLabel(question.code))}</div>
                     <h3>${escapeHtml(question.prompt)}</h3>
                     ${question.help_text ? `<p>${escapeHtml(question.help_text)}</p>` : ''}
                 </div>
@@ -763,7 +830,7 @@ function validateStep(section) {
         };
         renderForm();
         requestAnimationFrame(() => {
-            document.querySelector(`[data-question="${firstInvalid}"]`)?.scrollIntoView({behavior: 'smooth', block: 'center'});
+            getQuestionCard(firstInvalid)?.scrollIntoView({behavior: 'smooth', block: 'center'});
         });
         return false;
     }
@@ -773,7 +840,8 @@ function validateStep(section) {
     return true;
 }
 
-function renderForm() {
+function renderForm(options = {}) {
+    const viewportSnapshot = captureQuestionViewport(options.preserveQuestionCode || null);
     const sections = getVisibleSections();
     if (!sections.length) {
         surveyApp.innerHTML = '<div class="empty-state">No hay preguntas visibles para esta encuesta en este momento.</div>';
@@ -782,7 +850,7 @@ function renderForm() {
 
     currentStep = Math.max(0, Math.min(currentStep, sections.length - 1));
     const section = sections[currentStep];
-    renderStepper(sections);
+    renderStepper(sections, {alignActiveStep: !!options.alignActiveStep});
 
     surveyApp.innerHTML = `
         <form class="survey-form" id="publicSurveyForm" aria-busy="${isSubmitting ? 'true' : 'false'}">
@@ -810,6 +878,7 @@ function renderForm() {
     `;
 
     bindFormEvents(section);
+    restoreQuestionViewport(viewportSnapshot);
 }
 
 function bindFormEvents(section) {
@@ -817,28 +886,30 @@ function bindFormEvents(section) {
 
     form.querySelectorAll('input[type="radio"]:not([data-matrix-question])').forEach((input) => {
         input.addEventListener('change', () => {
+            const questionCode = input.dataset.questionCode || input.name;
             answers[input.name] = input.value;
-            clearQuestionState(input.dataset.questionCode || input.name);
+            clearQuestionState(questionCode);
             scheduleDraftSave();
             if (shouldRefreshForVisibility(input.name)) {
-                renderForm();
+                renderForm({preserveQuestionCode: questionCode});
                 return;
             }
-            renderForm();
+            renderForm({preserveQuestionCode: questionCode});
         });
     });
 
     form.querySelectorAll('input[type="checkbox"]').forEach((input) => {
         input.addEventListener('change', () => {
+            const questionCode = input.dataset.questionCode || input.name;
             const selected = Array.from(form.querySelectorAll(`input[name="${input.name}"]:checked`)).map((element) => element.value);
             answers[input.name] = selected;
-            clearQuestionState(input.dataset.questionCode || input.name);
+            clearQuestionState(questionCode);
             scheduleDraftSave();
             if (shouldRefreshForVisibility(input.name)) {
-                renderForm();
+                renderForm({preserveQuestionCode: questionCode});
                 return;
             }
-            renderForm();
+            renderForm({preserveQuestionCode: questionCode});
         });
     });
 
@@ -850,7 +921,7 @@ function bindFormEvents(section) {
         });
 
         input.addEventListener('blur', () => {
-            renderForm();
+            renderForm({preserveQuestionCode: input.name});
         });
     });
 
@@ -859,7 +930,7 @@ function bindFormEvents(section) {
             answers[input.name] = input.value;
             clearQuestionState(input.name);
             scheduleDraftSave();
-            renderForm();
+            renderForm({preserveQuestionCode: input.name});
         });
     });
 
@@ -873,14 +944,14 @@ function bindFormEvents(section) {
             answers[questionCode][rowCode][dimensionCode] = input.value;
             clearQuestionState(questionCode);
             scheduleDraftSave();
-            renderForm();
+            renderForm({preserveQuestionCode: questionCode});
         });
     });
 
     document.getElementById('prevButton')?.addEventListener('click', () => {
         currentStep -= 1;
         scheduleDraftSave();
-        renderForm();
+        renderForm({alignActiveStep: true});
         window.scrollTo({top: 0, behavior: 'smooth'});
     });
 
@@ -888,7 +959,7 @@ function bindFormEvents(section) {
         if (!validateStep(section)) return;
         currentStep += 1;
         scheduleDraftSave();
-        renderForm();
+        renderForm({alignActiveStep: true});
         window.scrollTo({top: 0, behavior: 'smooth'});
     });
 
@@ -905,7 +976,7 @@ function bindFormEvents(section) {
         draftWasRestored = false;
         formMessage = defaultFormMessage();
         clearDraft();
-        renderForm();
+        renderForm({alignActiveStep: true});
         window.scrollTo({top: 0, behavior: 'smooth'});
     });
 
@@ -915,7 +986,7 @@ function bindFormEvents(section) {
 
         isSubmitting = true;
         persistDraftNow();
-        renderForm();
+        renderForm({preserveQuestionCode: section.questions[section.questions.length - 1]?.code});
 
         try {
             const response = await fetch('<?= url('api/public/app.php?action=submit') ?>', {
@@ -946,7 +1017,7 @@ function bindFormEvents(section) {
                     renderForm();
                     const firstError = Object.keys(result.errors)[0];
                     requestAnimationFrame(() => {
-                        document.querySelector(`[data-question="${firstError}"]`)?.scrollIntoView({behavior: 'smooth', block: 'center'});
+                        getQuestionCard(firstError)?.scrollIntoView({behavior: 'smooth', block: 'center'});
                     });
                     return;
                 }
@@ -986,7 +1057,7 @@ window.addEventListener('beforeunload', () => {
     }
 });
 trackSurveyAccess();
-renderForm();
+renderForm({alignActiveStep: true});
 </script>
 <?php endif; ?>
 </body>
