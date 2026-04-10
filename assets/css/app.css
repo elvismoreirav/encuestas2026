@@ -2757,11 +2757,15 @@ th {
     }
 
     .matrix-table-row {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr !important;
         border: 1px solid rgba(30, 77, 57, 0.12);
         border-radius: 22px;
         overflow: hidden;
         background: rgba(255,255,255,0.96);
+    }
+
+    .matrix-head-grid {
+        display: none !important;
     }
 
     .matrix-candidate {
@@ -2952,6 +2956,22 @@ th {
     .form-actions .btn {
         flex: 1 1 100%;
         text-align: center;
+    }
+
+    .matrix-options {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+
+    .matrix-option {
+        min-height: 50px;
+        padding: 12px 14px;
+    }
+
+    .matrix-candidate,
+    .matrix-cell {
+        padding: 14px;
     }
 
     .form-status-dock {
