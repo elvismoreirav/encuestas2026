@@ -136,7 +136,7 @@ const surveyData = <?= json_encode($selectedSurvey, JSON_UNESCAPED_UNICODE | JSO
 const surveyApp = document.getElementById('surveyApp');
 const surveyStepper = document.getElementById('surveyStepper');
 const questionLookup = Object.fromEntries((surveyData.questions_flat || []).map((question) => [question.code, question]));
-const questionDisplayOrder = Object.fromEntries((surveyData.questions_flat || []).map((question, index) => [question.code, index + 1]));
+const knownQuestionCodes = new Set((surveyData.questions_flat || []).map((question) => question.code));
 const visibilityDrivers = new Set(
     (surveyData.questions_flat || []).flatMap((question) =>
         (Array.isArray(question.visibility_rules) ? question.visibility_rules : []).map((rule) => rule.question_code)
@@ -363,6 +363,57 @@ function isQuestionVisible(question) {
     });
 }
 
+function getVisibleQuestionCodes() {
+    return new Set(
+        (surveyData.questions_flat || [])
+            .filter((question) => isQuestionVisible(question))
+            .map((question) => question.code)
+    );
+}
+
+function getQuestionDisplayOrderMap() {
+    const orderMap = {};
+    let order = 1;
+
+    getVisibleSections().forEach((section) => {
+        section.questions.forEach((question) => {
+            orderMap[question.code] = order++;
+        });
+    });
+
+    return orderMap;
+}
+
+function pruneInvisibleAnswers() {
+    let changed = false;
+    let shouldRecheck = true;
+
+    while (shouldRecheck) {
+        shouldRecheck = false;
+        const visibleQuestionCodes = getVisibleQuestionCodes();
+
+        for (const questionCode of Object.keys(answers)) {
+            if (visibleQuestionCodes.has(questionCode)) {
+                continue;
+            }
+
+            if (!knownQuestionCodes.has(questionCode) || questionCode in answers) {
+                delete answers[questionCode];
+                invalidQuestions.delete(questionCode);
+                delete questionErrors[questionCode];
+                changed = true;
+                shouldRecheck = true;
+            }
+        }
+    }
+
+    if (changed && invalidQuestions.size === 0 && formMessage?.type === 'danger') {
+        formMessage = defaultFormMessage();
+    }
+
+    return changed;
+}
+
 function shouldRefreshForVisibility(questionCode) {
     return visibilityDrivers.has(questionCode);
 }
@@ -430,7 +481,7 @@ function questionTitle(code) {
 }
 
 function questionDisplayLabel(code) {
-    const order = questionDisplayOrder[code];
+    const order = getQuestionDisplayOrderMap()[code];
     return order ? String(order) : code;
 }
 
@@ -984,6 +1035,7 @@ function validateStep(section) {
 
 function renderForm(options = {}) {
     const viewportSnapshot = captureQuestionViewport(options.preserveQuestionCode || null);
+    pruneInvisibleAnswers();
     const sections = getVisibleSections();
     if (!sections.length) {
         surveyApp.innerHTML = '<div class="empty-state">No hay preguntas visibles para esta encuesta en este momento.</div>';
@@ -1050,11 +1102,10 @@ function bindFormEvents(section) {
             const questionCode = input.dataset.questionCode || input.name;
             answers[input.name] = input.value;
             clearQuestionState(questionCode);
-            scheduleDraftSave();
-            if (shouldRefreshForVisibility(input.name)) {
-                renderForm({preserveQuestionCode: questionCode});
-                return;
+            if (shouldRefreshForVisibility(input.name) && pruneInvisibleAnswers()) {
+                clearQuestionState(input.name);
             }
+            scheduleDraftSave();
             renderForm({preserveQuestionCode: questionCode});
         });
     });
@@ -1065,11 +1116,10 @@ function bindFormEvents(section) {
             const selected = Array.from(form.querySelectorAll(`input[name="${input.name}"]:checked`)).map((element) => element.value);
             answers[input.name] = selected;
             clearQuestionState(questionCode);
-            scheduleDraftSave();
-            if (shouldRefreshForVisibility(input.name)) {
-                renderForm({preserveQuestionCode: questionCode});
-                return;
+            if (shouldRefreshForVisibility(input.name) && pruneInvisibleAnswers()) {
+                clearQuestionState(input.name);
             }
+            scheduleDraftSave();
             renderForm({preserveQuestionCode: questionCode});
         });
     });
@@ -1078,10 +1128,16 @@ function bindFormEvents(section) {
         input.addEventListener('input', () => {
             answers[input.name] = input.value;
             clearQuestionState(input.name);
+            if (shouldRefreshForVisibility(input.name)) {
+                pruneInvisibleAnswers();
+            }
             scheduleDraftSave();
         });
 
         input.addEventListener('blur', () => {
+            if (shouldRefreshForVisibility(input.name) && pruneInvisibleAnswers()) {
+                clearQuestionState(input.name);
+            }
             renderForm({preserveQuestionCode: input.name});
         });
     });
@@ -1090,6 +1146,9 @@ function bindFormEvents(section) {
         input.addEventListener('change', () => {
             answers[input.name] = input.value;
             clearQuestionState(input.name);
+            if (shouldRefreshForVisibility(input.name) && pruneInvisibleAnswers()) {
+                clearQuestionState(input.name);
+            }
             scheduleDraftSave();
             renderForm({preserveQuestionCode: input.name});
         });
@@ -1212,8 +1271,10 @@ function bindFormEvents(section) {
 }
 
 restoreDraft();
+pruneInvisibleAnswers();
 window.addEventListener('beforeunload', () => {
     if (Object.keys(answers).length > 0) {
+        pruneInvisibleAnswers();
         persistDraftNow();
     }
 });
