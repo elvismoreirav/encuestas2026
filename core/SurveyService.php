@@ -1531,6 +1531,7 @@ class SurveyService
             $result = match ($operator) {
                 'not_equals' => $actual !== $expected,
                 'contains' => is_array($actual) && in_array($expected, $actual, true),
+                'in' => is_array($expected) && in_array((string) ($actual ?? ''), array_map('strval', $expected), true),
                 default => is_array($actual) ? in_array($expected, $actual, true) : (string) $actual === (string) $expected,
             };
 

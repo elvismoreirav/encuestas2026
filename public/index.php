@@ -359,6 +359,7 @@ function isQuestionVisible(question) {
         const actual = answers[rule.question_code] ?? null;
         if (rule.operator === 'not_equals') return actual !== rule.value;
         if (rule.operator === 'contains') return Array.isArray(actual) && actual.includes(rule.value);
+        if (rule.operator === 'in') return Array.isArray(rule.value) && rule.value.includes(String(actual ?? ''));
         return Array.isArray(actual) ? actual.includes(rule.value) : String(actual ?? '') === String(rule.value ?? '');
     });
 }
