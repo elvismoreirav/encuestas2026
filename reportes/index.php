@@ -11,6 +11,7 @@ auth()->requireInsightsAccess();
 
 $surveyList = surveys()->listSurveys(auth()->user());
 $selectedSurveyId = (int) ($_GET['survey_id'] ?? ($surveyList[0]['id'] ?? 0));
+$selectedReportScope = strtolower(trim((string) ($_GET['report_scope'] ?? ''))) === 'special' ? 'special' : 'primary';
 
 $pageTitle = 'Reportes';
 $pageDescription = 'Analítica ejecutiva de encuestas con métricas, comparativos y hallazgos por pregunta.';
@@ -27,6 +28,7 @@ require TEMPLATES_PATH . '/admin_header.php';
         </div>
     </div>
     <form id="statsFilterForm" class="report-filter-grid">
+        <input type="hidden" name="report_scope" id="stats_report_scope" value="<?= e($selectedReportScope) ?>">
         <div class="field">
             <label>Encuesta</label>
             <select name="survey_id" id="stats_survey_id">
@@ -57,6 +59,10 @@ require TEMPLATES_PATH . '/admin_header.php';
             <button class="btn btn-primary" type="button" id="loadStatsButton">Actualizar reporte</button>
             <button class="btn btn-secondary" type="button" id="exportStatsButton">Descargar resumen</button>
             <button class="btn btn-secondary" type="button" id="printReportButton">Imprimir</button>
+        </div>
+        <div class="segmented-actions" id="reportScopeButtons">
+            <button class="segmented-button <?= $selectedReportScope === 'primary' ? 'active' : '' ?>" type="button" data-scope="primary">Dashboard principal</button>
+            <button class="segmented-button <?= $selectedReportScope === 'special' ? 'active' : '' ?>" type="button" data-scope="special">Reporte aparte</button>
         </div>
         <div class="segmented-actions" id="quickRangeButtons">
             <button class="segmented-button" type="button" data-range="7">7 días</button>
@@ -249,6 +255,34 @@ function setActiveQuickRange(activeButton = null) {
     });
 }
 
+function setActiveReportScope(scope = 'primary') {
+    document.querySelectorAll('#reportScopeButtons .segmented-button').forEach((button) => {
+        button.classList.toggle('active', button.dataset.scope === scope);
+    });
+}
+
+function syncReportUrlState() {
+    const url = new URL(window.location.href);
+    const params = new URLSearchParams(new FormData(document.getElementById('statsFilterForm')));
+
+    ['from', 'to'].forEach((key) => {
+        if (!String(params.get(key) || '').trim()) {
+            params.delete(key);
+        }
+    });
+
+    if ((params.get('location') || 'all') === 'all') {
+        params.delete('location');
+    }
+
+    if ((params.get('report_scope') || 'primary') === 'primary') {
+        params.delete('report_scope');
+    }
+
+    url.search = params.toString();
+    window.history.replaceState({}, '', url);
+}
+
 function toDateInputValue(date) {
     const adjusted = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
     return adjusted.toISOString().slice(0, 10);
@@ -377,6 +411,13 @@ function renderSummaryCards(summary, survey, locationFilter) {
             <div class="metric-value">${summary.questions}</div>
             <div class="metric-label">Preguntas parametrizadas</div>
             <div class="metric-foot">${summary.sections} secciones en el instrumento</div>
+        </article>
+        <article class="card report-summary-card">
+            <div class="metric-label">Vista activa</div>
+            <div class="report-summary-main">${escapeHtml(summary.report_scope_label || 'Dashboard principal')}</div>
+            <div class="metric-foot">${summary.report_scope === 'special'
+                ? 'Preguntas etiquetadas fuera del tablero principal'
+                : 'Preguntas estándar visibles en el tablero principal'}</div>
         </article>
         ${locationCard}
         <article class="card report-summary-card">
@@ -926,10 +967,11 @@ function downloadStats() {
     }
 
     const surveyName = document.getElementById('stats_survey_id').selectedOptions[0]?.textContent || 'encuesta';
+    const scopeSuffix = lastStatsPayload?.report_scope === 'special' ? '-reporte-aparte' : '-reporte-principal';
     const blob = new Blob([JSON.stringify(lastStatsPayload, null, 2)], {type: 'application/json;charset=utf-8'});
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `${slugify(surveyName)}-reporte.json`;
+    link.download = `${slugify(surveyName)}${scopeSuffix}.json`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -968,6 +1010,8 @@ async function loadStats() {
 
     destroyCharts();
     lastStatsPayload = result.data;
+    setActiveReportScope(result.data.report_scope || document.getElementById('stats_report_scope')?.value || 'primary');
+    syncReportUrlState();
     renderReport(lastStatsPayload);
 }
 
@@ -984,10 +1028,19 @@ function bootReportsPage() {
     document.querySelectorAll('#quickRangeButtons .segmented-button').forEach((button) => {
         button.addEventListener('click', () => applyQuickRange(button.dataset.range, button));
     });
+    document.querySelectorAll('#reportScopeButtons .segmented-button').forEach((button) => {
+        button.addEventListener('click', () => {
+            document.getElementById('stats_report_scope').value = button.dataset.scope || 'primary';
+            setActiveReportScope(button.dataset.scope || 'primary');
+            resetLocationFilterControl();
+            loadStats();
+        });
+    });
 
     document.getElementById('stats_from').addEventListener('change', () => setActiveQuickRange(null));
     document.getElementById('stats_to').addEventListener('change', () => setActiveQuickRange(null));
 
+    setActiveReportScope(document.getElementById('stats_report_scope')?.value || 'primary');
     resetLocationFilterControl();
     loadStats();
 }

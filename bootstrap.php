@@ -2,6 +2,8 @@
 
 define('ENCUESTAS2026', true);
 
+ob_start();
+
 require_once __DIR__ . '/config/config.php';
 
 spl_autoload_register(static function (string $class): void {

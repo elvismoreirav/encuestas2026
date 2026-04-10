@@ -62,8 +62,12 @@ require TEMPLATES_PATH . '/admin_header.php';
                 <p>Consulte capturas recientes, detalle por formulario y trazabilidad.</p>
             </a>
             <a class="shortcut-card" href="<?= url('reportes/index.php') ?>">
-                <strong>Analizar reportes</strong>
-                <p>Abra métricas, tendencias y gráficos comparativos por pregunta.</p>
+                <strong>Reporte principal</strong>
+                <p>Abra métricas, tendencias y gráficos comparativos sin las preguntas etiquetadas para reporte aparte.</p>
+            </a>
+            <a class="shortcut-card" href="<?= url('reportes/index.php?report_scope=special') ?>">
+                <strong>Reporte aparte</strong>
+                <p>Consulte únicamente las preguntas marcadas para revisión separada.</p>
             </a>
         <?php endif; ?>
         <?php if (auth()->canManageUsers()): ?>
@@ -126,6 +130,7 @@ require TEMPLATES_PATH . '/admin_header.php';
                             <?php endif; ?>
                             <?php if ($canAccessInsights): ?>
                                 <a class="btn btn-secondary" href="<?= url('reportes/index.php?survey_id=' . (int) $survey['id']) ?>">Ver reporte</a>
+                                <a class="btn btn-secondary" href="<?= url('reportes/index.php?survey_id=' . (int) $survey['id'] . '&report_scope=special') ?>">Reporte aparte</a>
                             <?php endif; ?>
                         </td>
                     </tr>

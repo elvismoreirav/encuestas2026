@@ -2,6 +2,8 @@
 
 class SurveyService
 {
+    private const SECONDARY_REPORT_TAG = 'ELVIS PORFAVOR ESTA';
+
     private static ?SurveyService $instance = null;
     private Database $db;
     private ?bool $surveyAccessLogTableAvailable = null;
@@ -592,17 +594,29 @@ class SurveyService
             throw new InvalidArgumentException('Encuesta no encontrada.');
         }
 
+        $reportScope = $this->normalizeAnalyticsReportScope($filters['report_scope'] ?? null);
+        $analyticsQuestions = $this->filterAnalyticsQuestionsByScope($survey['questions_flat'], $reportScope);
+        $analyticsQuestionCodes = array_fill_keys(array_map(static fn(array $question): string => (string) $question['code'], $analyticsQuestions), true);
+        $analyticsSectionIds = [];
+        foreach ($analyticsQuestions as $question) {
+            $analyticsSectionIds[(int) $question['section_id']] = true;
+        }
+        $analyticsSections = array_values(array_filter(
+            $survey['sections'],
+            static fn(array $section): bool => isset($analyticsSectionIds[(int) $section['id']])
+        ));
+
         $sectionTitles = [];
-        foreach ($survey['sections'] as $section) {
+        foreach ($analyticsSections as $section) {
             $sectionTitles[(int) $section['id']] = $section['title'];
         }
 
         $questionMeta = [];
-        foreach ($survey['questions_flat'] as $question) {
+        foreach ($analyticsQuestions as $question) {
             $questionMeta[$question['code']] = [
                 'id' => (int) $question['id'],
                 'code' => $question['code'],
-                'title' => $question['prompt'],
+                'title' => $this->sanitizeAnalyticsQuestionTitle((string) ($question['prompt'] ?? '')),
                 'type' => $question['question_type'],
                 'section_id' => (int) $question['section_id'],
                 'section_title' => $sectionTitles[(int) $question['section_id']] ?? 'Sin sección',
@@ -739,13 +753,22 @@ class SurveyService
             );
 
             foreach ($answerCountRows as $row) {
-                $answerCountMap[$row['question_code']] = (int) $row['total'];
+                $code = (string) ($row['question_code'] ?? '');
+                if (!isset($analyticsQuestionCodes[$code])) {
+                    continue;
+                }
+
+                $answerCountMap[$code] = (int) $row['total'];
             }
 
             foreach ($optionRows as $row) {
                 $code = $row['question_code'];
+                if (!isset($analyticsQuestionCodes[$code])) {
+                    continue;
+                }
+
                 $meta = $questionMeta[$code] ?? [
-                    'title' => $row['question_prompt'],
+                    'title' => $this->sanitizeAnalyticsQuestionTitle((string) ($row['question_prompt'] ?? '')),
                     'section_title' => 'Sin sección',
                 ];
                 $questionStats[$code] ??= [
@@ -773,6 +796,10 @@ class SurveyService
             }
 
             foreach ($textByQuestion as $code => $texts) {
+                if (!isset($analyticsQuestionCodes[$code])) {
+                    continue;
+                }
+
                 $meta = $questionMeta[$code] ?? [
                     'title' => $this->findQuestionTitle($survey, $code),
                     'section_title' => 'Sin sección',
@@ -806,6 +833,10 @@ class SurveyService
                 }
 
                 foreach ($matrixStats as $code => $matrixData) {
+                    if (!isset($analyticsQuestionCodes[$code])) {
+                        continue;
+                    }
+
                     $meta = $questionMeta[$code] ?? [
                         'title' => $this->findQuestionTitle($survey, $code),
                         'section_title' => 'Sin sección',
@@ -827,7 +858,7 @@ class SurveyService
 
         $coverage = [];
         $sectionStats = [];
-        foreach ($survey['sections'] as $section) {
+        foreach ($analyticsSections as $section) {
             $sectionStats[(int) $section['id']] = [
                 'id' => (int) $section['id'],
                 'title' => $section['title'],
@@ -838,7 +869,7 @@ class SurveyService
             ];
         }
 
-        foreach ($survey['questions_flat'] as $question) {
+        foreach ($analyticsQuestions as $question) {
             $code = $question['code'];
             $meta = $questionMeta[$code];
             $responsesCount = $answerCountMap[$code] ?? 0;
@@ -875,7 +906,7 @@ class SurveyService
         });
 
         $orderedQuestionStats = [];
-        foreach ($survey['questions_flat'] as $question) {
+        foreach ($analyticsQuestions as $question) {
             $code = $question['code'];
             if (isset($questionStats[$code])) {
                 $orderedQuestionStats[$code] = $questionStats[$code];
@@ -910,14 +941,16 @@ class SurveyService
             ],
             'summary' => [
                 'responses' => $totalResponses,
-                'questions' => count($survey['questions_flat']),
-                'sections' => count($survey['sections']),
+                'questions' => count($analyticsQuestions),
+                'sections' => count($analyticsSections),
                 'active_days' => $activeDays,
                 'average_per_day' => $averagePerDay,
                 'first_submission_at' => $firstSubmittedAt,
                 'last_submission_at' => $lastSubmittedAt,
                 'location_label' => $locationFilter['selected_label'],
                 'active_locations' => $locationFilter['active_option_count'],
+                'report_scope' => $reportScope,
+                'report_scope_label' => $this->analyticsReportScopeLabel($reportScope),
                 'date_range' => [
                     'from' => $filters['from'] ?? null,
                     'to' => $filters['to'] ?? null,
@@ -926,11 +959,54 @@ class SurveyService
             'location_filter' => $locationFilter,
             'location_distribution' => $locationDistribution,
             'time_series' => $timeSeries,
+            'report_scope' => $reportScope,
+            'report_scope_label' => $this->analyticsReportScopeLabel($reportScope),
             'coverage' => $coverage,
             'section_stats' => array_values($sectionStats),
             'question_stats' => $orderedQuestionStats,
             'highlights' => $highlights,
         ];
+    }
+
+    private function normalizeAnalyticsReportScope(mixed $value): string
+    {
+        $normalized = strtolower(trim((string) ($value ?? '')));
+        return in_array($normalized, ['special', 'secondary', 'separate', 'apartado'], true) ? 'special' : 'primary';
+    }
+
+    private function analyticsReportScopeLabel(string $scope): string
+    {
+        return $scope === 'special' ? 'Reporte aparte' : 'Dashboard principal';
+    }
+
+    private function filterAnalyticsQuestionsByScope(array $questions, string $scope): array
+    {
+        return array_values(array_filter($questions, function (array $question) use ($scope): bool {
+            $isSecondary = $this->questionBelongsToSecondaryReport($question);
+            return $scope === 'special' ? $isSecondary : !$isSecondary;
+        }));
+    }
+
+    private function questionBelongsToSecondaryReport(array $question): bool
+    {
+        $settings = is_array($question['settings'] ?? null) ? $question['settings'] : [];
+        $reportScope = strtolower(trim((string) ($settings['report_scope'] ?? '')));
+        if (in_array($reportScope, ['special', 'secondary', 'separate', 'apartado'], true)) {
+            return true;
+        }
+
+        $prompt = (string) ($question['prompt'] ?? $question['title'] ?? '');
+        return stripos($prompt, self::SECONDARY_REPORT_TAG) !== false;
+    }
+
+    private function sanitizeAnalyticsQuestionTitle(string $title): string
+    {
+        $markerPosition = stripos($title, self::SECONDARY_REPORT_TAG);
+        if ($markerPosition === false) {
+            return trim($title);
+        }
+
+        return trim(preg_replace('/\s+/', ' ', substr($title, 0, $markerPosition)) ?: '');
     }
 
     private function resolveAnalyticsLocationQuestion(array $survey): ?array

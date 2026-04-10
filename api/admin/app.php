@@ -98,6 +98,7 @@ try {
                 'from' => $payload['from'] ?? null,
                 'to' => $payload['to'] ?? null,
                 'location' => $payload['location'] ?? null,
+                'report_scope' => $payload['report_scope'] ?? null,
             ], $authUser);
             json_response(['success' => true, 'data' => $stats]);
 

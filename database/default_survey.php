@@ -13,6 +13,98 @@ $yesNo = static fn(): array => [
     ['code' => 'NO', 'label' => 'No', 'value' => 'No'],
 ];
 
+$optionList = static function (array $labels): array {
+    $options = [];
+    foreach (array_values($labels) as $index => $label) {
+        $options[] = [
+            'code' => 'OPT_' . ($index + 1),
+            'label' => $label,
+        ];
+    }
+
+    return $options;
+};
+
+$rafaelCorreaAlcaldeByCanton = [
+    'PORTOVIEJO' => ['Gabriela Molina', 'Fernando Cedeño', 'Leonardo Orlando', 'José Vicente Santos', 'Melissa Zambrano'],
+    'MANTA' => ['Jaime Estrada', 'Otro'],
+    'CHONE' => ['Raúl Andrade', 'Raisa Corral'],
+    'EL_CARMEN' => ['Cristóbal Vélez', 'Kelly Buenaventura', 'Dairy Moreira', 'María Fernanda Ferrín'],
+    'JIPIJAPA' => ['César Delgado', 'Jonny Cañarte'],
+    'MONTECRISTI' => ['Adrián Pazmiño', 'Otro'],
+    'PEDERNALES' => ['Santos Cedeño P', 'Carlos Cedeño', 'María Emilia Arauz'],
+    'SUCRE' => ['Fernando Barreiro', 'Otro'],
+    'SANTA_ANA' => ['Nela Cedeño', 'Ingrid Bravo', 'Roberth Cevallos', 'Marianela Lobo'],
+    'TOSAGUA' => ['Romel Cedeño', 'Leonardo Sánchez'],
+    'BOLIVAR' => ['Walter Cevallos', 'Silvio Lara'],
+    'JUNIN' => ['Klever Solórzano', 'Gema Mendoza'],
+    '24_DE_MAYO' => ['Erite Alarcón', 'Otro'],
+    'PICHINCHA' => ['Leodan Intriago', 'Judy Mendoza', 'Alejandro López'],
+    'SAN_VICENTE' => ['Fabricio Lara', 'César Mendoza'],
+    'PAJAN' => ['Karen Marcillo', 'Joao Acuña'],
+    'OLMEDO' => ['Lourdes Guerrero', 'Ingris Mendoza'],
+    'FLAVIO_ALFARO' => ['Fabián Rodríguez', 'Otro'],
+    'PUERTO_LOPEZ' => ['Miguel Macías', 'Belén Villanueva'],
+    'JARAMIJO' => ['Cristhina Calderón', 'Otro'],
+    'ROCAFUERTE' => ['Luis Castro', 'Iván de la Torre'],
+    'JAMA' => ['Ángel Rojas', 'Luisa Cuadrado', 'Mary Carmen Coveña'],
+];
+
+$rafaelCorreaPrefectoOptions = $optionList([
+    'Luisa González',
+    'Jaime Estrada Medranda',
+    'Juan José Peña',
+    'José Antonio Orlando',
+    'Gabriela Molina',
+]);
+
+$buildRafaelCorreaAlcaldeQuestions = static function () use ($rafaelCorreaAlcaldeByCanton, $optionList): array {
+    $cantons = [
+        'PORTOVIEJO' => 'Portoviejo',
+        'MANTA' => 'Manta',
+        'CHONE' => 'Chone',
+        'EL_CARMEN' => 'El Carmen',
+        'JIPIJAPA' => 'Jipijapa',
+        'MONTECRISTI' => 'Montecristi',
+        'PEDERNALES' => 'Pedernales',
+        'SUCRE' => 'Sucre',
+        'SANTA_ANA' => 'Santa Ana',
+        'TOSAGUA' => 'Tosagua',
+        'BOLIVAR' => 'Bolívar',
+        'JUNIN' => 'Junín',
+        '24_DE_MAYO' => '24 de Mayo',
+        'PICHINCHA' => 'Pichincha',
+        'SAN_VICENTE' => 'San Vicente',
+        'PAJAN' => 'Paján',
+        'OLMEDO' => 'Olmedo',
+        'FLAVIO_ALFARO' => 'Flavio Alfaro',
+        'PUERTO_LOPEZ' => 'Puerto López',
+        'JARAMIJO' => 'Jaramijó',
+        'ROCAFUERTE' => 'Rocafuerte',
+        'JAMA' => 'Jama',
+    ];
+
+    $questions = [];
+    $sortOrder = 2;
+
+    foreach ($rafaelCorreaAlcaldeByCanton as $cantonCode => $candidateLabels) {
+        $questions[] = [
+            'code' => 'Q24_ALCALDE_RC_' . $cantonCode,
+            'prompt' => 'Si respondió Rafael Correa, ¿por cuál de los siguientes candidatos apoyados por Rafael Correa votaría para la alcaldía de ' . ($cantons[$cantonCode] ?? $cantonCode) . '?',
+            'question_type' => 'single_choice',
+            'is_required' => 1,
+            'sort_order' => $sortOrder++,
+            'visibility_rules' => [
+                ['question_code' => 'Q23_ALCALDE_APOYO', 'operator' => 'equals', 'value' => 'RAFAEL_CORREA'],
+                ['question_code' => 'Q1', 'operator' => 'equals', 'value' => $cantonCode],
+            ],
+            'options' => $optionList($candidateLabels),
+        ];
+    }
+
+    return $questions;
+};
+
 return [
     'name' => 'Encuesta elecciones abril 2026',
     'slug' => 'elecciones-abril-2026',
@@ -304,11 +396,52 @@ return [
             'sort_order' => 4,
             'questions' => [
                 [
+                    'code' => 'Q23_ALCALDE_APOYO',
+                    'prompt' => 'Ud votaría al candidato a alcalde apoyado por:',
+                    'question_type' => 'single_choice',
+                    'is_required' => 1,
+                    'sort_order' => 1,
+                    'options' => [
+                        ['code' => 'JAIME_ESTRADA', 'label' => 'Jaime Estrada'],
+                        ['code' => 'AGUSTIN_CASANOVA', 'label' => 'Agustín Casanova'],
+                        ['code' => 'LEONARDO_ORLANDO', 'label' => 'Leonardo Orlando'],
+                        ['code' => 'MARIANO_ZAMBRANO', 'label' => 'Mariano Zambrano'],
+                        ['code' => 'RAFAEL_CORREA', 'label' => 'Rafael Correa'],
+                        ['code' => 'DANIEL_NOBOA', 'label' => 'Daniel Noboa'],
+                        ['code' => 'JAIME_NEBOT', 'label' => 'Jaime Nebot'],
+                    ],
+                ],
+                ...$buildRafaelCorreaAlcaldeQuestions(),
+                [
+                    'code' => 'Q23_PREFECTO_APOYO',
+                    'prompt' => 'Ud votaría al candidato a prefecto apoyado por:',
+                    'question_type' => 'single_choice',
+                    'is_required' => 1,
+                    'sort_order' => count($rafaelCorreaAlcaldeByCanton) + 2,
+                    'options' => [
+                        ['code' => 'RAFAEL_CORREA', 'label' => 'Rafael Correa'],
+                        ['code' => 'DANIEL_NOBOA', 'label' => 'Daniel Noboa'],
+                        ['code' => 'JAIME_NEBOT', 'label' => 'Jaime Nebot'],
+                        ['code' => 'LEONARDO_ORLANDO', 'label' => 'Leonardo Orlando'],
+                    ],
+                ],
+                [
+                    'code' => 'Q24_PREFECTO_RC',
+                    'prompt' => 'Si respondió Rafael Correa, ¿por cuál de los siguientes candidatos apoyados por Rafael Correa votaría para prefectura?',
+                    'question_type' => 'single_choice',
+                    'is_required' => 1,
+                    'sort_order' => count($rafaelCorreaAlcaldeByCanton) + 3,
+                    'visibility_rules' => [
+                        ['question_code' => 'Q23_PREFECTO_APOYO', 'operator' => 'equals', 'value' => 'RAFAEL_CORREA'],
+                    ],
+                    'options' => $rafaelCorreaPrefectoOptions,
+                ],
+                [
                     'code' => 'Q26',
                     'prompt' => 'Si las elecciones a Prefecto/a fueran hoy, por quién votaría Papeleta (A)',
                     'question_type' => 'single_choice',
                     'is_required' => 1,
-                    'sort_order' => 1,
+                    'sort_order' => count($rafaelCorreaAlcaldeByCanton) + 4,
                     'options' => [
                         ['code' => 'JUAN_JOSE_PENA', 'label' => 'Juan José Peña - Si Podemos'],
                         ['code' => 'AGUSTIN_CASANOVA', 'label' => 'Agustín Casanova - Caminantes'],
@@ -323,7 +456,7 @@ return [
                     'prompt' => 'Si las elecciones a Prefecto/a fueran hoy, por quién votaría Papeleta (B)',
                     'question_type' => 'single_choice',
                     'is_required' => 1,
-                    'sort_order' => 2,
+                    'sort_order' => count($rafaelCorreaAlcaldeByCanton) + 5,
                     'options' => [
                         ['code' => 'JAIME_ESTRADA', 'label' => 'Jaime Estrada - Si Podemos'],
                         ['code' => 'AGUSTIN_CASANOVA', 'label' => 'Agustín Casanova - Caminantes'],
@@ -339,7 +472,7 @@ return [
                     'prompt' => 'Si las elecciones a Alcalde/sa fueran hoy, por quién votaría Papeleta (A)',
                     'question_type' => 'single_choice',
                     'is_required' => 0,
-                    'sort_order' => 3,
+                    'sort_order' => count($rafaelCorreaAlcaldeByCanton) + 6,
                     'visibility_rules' => [['question_code' => 'Q1', 'operator' => 'equals', 'value' => 'PORTOVIEJO']],
                     'options' => [
                         ['code' => 'LEONARDO_ORLANDO', 'label' => 'Leonardo Orlando - Si Podemos'],
@@ -356,7 +489,7 @@ return [
                     'prompt' => 'Si las elecciones a Alcalde/sa fueran hoy, por quién votaría Papeleta (B)',
                     'question_type' => 'single_choice',
                     'is_required' => 0,
-                    'sort_order' => 4,
+                    'sort_order' => count($rafaelCorreaAlcaldeByCanton) + 7,
                     'visibility_rules' => [['question_code' => 'Q1', 'operator' => 'equals', 'value' => 'PORTOVIEJO']],
                     'options' => [
                         ['code' => 'CANDIDATO_SI_PODEMOS', 'label' => 'Candidato Si Podemos'],
