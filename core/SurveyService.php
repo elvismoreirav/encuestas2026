@@ -1317,9 +1317,23 @@ class SurveyService
             $highlightLabel = null;
             $highlightCount = null;
             $highlightPercentage = null;
+            $optionBreakdown = [];
+            $otherOptions = [];
+            $otherOptionsSummary = 'Sin lectura adicional.';
 
             if (is_array($stat)) {
                 if (($stat['type'] ?? '') === 'choice') {
+                    $optionBreakdown = array_values(array_map(static fn(array $option): array => [
+                        'label' => (string) ($option['label'] ?? ''),
+                        'count' => (int) ($option['count'] ?? 0),
+                        'percentage' => (float) ($option['percentage'] ?? 0),
+                    ], array_filter(
+                        (array) ($stat['options'] ?? []),
+                        static fn(array $option): bool => trim((string) ($option['label'] ?? '')) !== ''
+                    )));
+                    $otherOptions = array_slice($optionBreakdown, 1);
+                    $otherOptionsSummary = $this->summarizeAnalyticsOptionRows($otherOptions);
+
                     $topOption = $stat['options'][0] ?? null;
                     if (is_array($topOption)) {
                         $highlightLabel = (string) ($topOption['label'] ?? '');
@@ -1369,6 +1383,9 @@ class SurveyService
                 'highlight_label' => $highlightLabel,
                 'highlight_count' => $highlightCount,
                 'highlight_percentage' => $highlightPercentage,
+                'option_breakdown' => $optionBreakdown,
+                'other_options' => $otherOptions,
+                'other_options_summary' => $otherOptionsSummary,
                 'has_activity' => $responses > 0,
             ];
         }
@@ -1403,6 +1420,139 @@ class SurveyService
             'matrix' => 'Matriz',
             default => ucfirst(str_replace('_', ' ', trim($type))),
         };
+    }
+
+    private function summarizeAnalyticsOptionRows(array $options): string
+    {
+        $normalized = array_values(array_filter(array_map(static function (array $option): array {
+            return [
+                'label' => trim((string) ($option['label'] ?? '')),
+                'count' => (int) ($option['count'] ?? 0),
+                'percentage' => (float) ($option['percentage'] ?? 0),
+            ];
+        }, $options), static fn(array $option): bool => $option['label'] !== ''));
+
+        if ($normalized === []) {
+            return 'Sin lectura adicional.';
+        }
+
+        return implode(' | ', array_map(
+            static fn(array $option): string => sprintf(
+                '%s · %s (%d)',
+                $option['label'],
+                number_format($option['percentage'], 1) . '%',
+                $option['count']
+            ),
+            $normalized
+        ));
+    }
+
+    public function downloadAnalyticsCountMatrixXlsx(array $analytics): never
+    {
+        $summary = is_array($analytics['summary'] ?? null) ? $analytics['summary'] : [];
+        $survey = is_array($analytics['survey'] ?? null) ? $analytics['survey'] : [];
+        $locationFilter = is_array($analytics['location_filter'] ?? null) ? $analytics['location_filter'] : [];
+        $countMatrix = is_array($analytics['count_matrix'] ?? null) ? $analytics['count_matrix'] : [];
+        $territorial = is_array($countMatrix['territorial'] ?? null) ? $countMatrix['territorial'] : [];
+        $questions = is_array($countMatrix['questions'] ?? null) ? $countMatrix['questions'] : [];
+
+        $summaryRows = [
+            ['Campo', 'Valor'],
+            ['Encuesta', (string) ($survey['name'] ?? 'Encuesta')],
+            ['Vista', (string) ($analytics['report_scope_label'] ?? $summary['report_scope_label'] ?? 'Dashboard principal')],
+            ['Ubicación filtrada', (string) ($locationFilter['selected_label'] ?? 'Todos')],
+            ['Desde', (string) (($summary['date_range']['from'] ?? null) ?: 'Sin límite')],
+            ['Hasta', (string) (($summary['date_range']['to'] ?? null) ?: 'Sin límite')],
+            ['Respuestas analizadas', (int) ($summary['responses'] ?? 0)],
+            ['Preguntas parametrizadas', (int) ($summary['questions'] ?? 0)],
+            ['Secciones', (int) ($summary['sections'] ?? 0)],
+            ['Días con actividad', (int) ($summary['active_days'] ?? 0)],
+            ['Promedio diario', (float) ($summary['average_per_day'] ?? 0)],
+            ['Primera captura', (string) (($summary['first_submission_at'] ?? null) ?: 'Sin registro')],
+            ['Última captura', (string) (($summary['last_submission_at'] ?? null) ?: 'Sin registro')],
+            ['Generado', date('Y-m-d H:i:s')],
+        ];
+
+        $territorialRows = [[
+            'Cantón / ciudad',
+            'Conteo',
+            '% rango',
+            'Primera captura',
+            'Última captura',
+            'Estado',
+        ]];
+
+        foreach ((array) ($territorial['rows'] ?? []) as $row) {
+            $territorialRows[] = [
+                (string) ($row['label'] ?? ''),
+                (int) ($row['count'] ?? 0),
+                (float) ($row['percentage'] ?? 0),
+                (string) (($row['first_submission_at'] ?? null) ?: 'Sin registro'),
+                (string) (($row['last_submission_at'] ?? null) ?: 'Sin registro'),
+                (bool) ($row['is_selected'] ?? false)
+                    ? 'En foco'
+                    : ((int) ($row['count'] ?? 0) > 0 ? 'Con actividad' : 'Sin actividad'),
+            ];
+        }
+
+        $questionRows = [[
+            '#',
+            'Pregunta',
+            'Sección',
+            'Tipo',
+            'Resp.',
+            'Cobertura',
+            'Lectura rápida',
+            'Otras respuestas',
+        ]];
+
+        foreach ((array) ($questions['rows'] ?? []) as $row) {
+            $questionRows[] = [
+                (int) ($row['position'] ?? 0),
+                trim((string) (($row['code'] ?? '') . '. ' . ($row['title'] ?? '')), '. '),
+                (string) ($row['section_title'] ?? 'Sin sección'),
+                (string) ($row['type_label'] ?? $row['type'] ?? ''),
+                (int) ($row['responses'] ?? 0),
+                (float) ($row['coverage_percentage'] ?? 0),
+                $this->buildAnalyticsQuickReadingLabel(is_array($row) ? $row : []),
+                (string) ($row['other_options_summary'] ?? 'Sin lectura adicional.'),
+            ];
+        }
+
+        $filename = Helpers::slugify((string) ($survey['name'] ?? 'reporte')) . '-matriz-conteo';
+        $scope = (string) ($analytics['report_scope'] ?? 'primary');
+        if ($scope === 'special') {
+            $filename .= '-reporte-aparte';
+        }
+        $filename .= '.xlsx';
+
+        Helpers::downloadXlsx($filename, [
+            ['name' => 'Resumen', 'rows' => $summaryRows],
+            ['name' => 'Conteo territorial', 'rows' => $territorialRows],
+            ['name' => 'Conteo por pregunta', 'rows' => $questionRows],
+        ]);
+    }
+
+    private function buildAnalyticsQuickReadingLabel(array $row): string
+    {
+        $highlightLabel = trim((string) ($row['highlight_label'] ?? ''));
+        $highlightCount = $row['highlight_count'] ?? null;
+        $highlightPercentage = $row['highlight_percentage'] ?? null;
+
+        if ($highlightLabel !== '' && $highlightPercentage !== null && $highlightPercentage !== '') {
+            return sprintf(
+                '%s · %s (%d)',
+                $highlightLabel,
+                number_format((float) $highlightPercentage, 1) . '%',
+                (int) $highlightCount
+            );
+        }
+
+        if ($highlightLabel !== '' && $highlightCount !== null && $highlightCount !== '') {
+            return sprintf('%s · %d', $highlightLabel, (int) $highlightCount);
+        }
+
+        return (string) ($row['summary'] ?? 'Sin lectura rápida.');
     }
 
     public function submitResponse(string $slug, array $payload): array

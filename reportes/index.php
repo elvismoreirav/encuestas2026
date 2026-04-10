@@ -57,7 +57,7 @@ require TEMPLATES_PATH . '/admin_header.php';
     <div class="report-toolbar">
         <div class="actions-inline">
             <button class="btn btn-primary" type="button" id="loadStatsButton">Actualizar reporte</button>
-            <button class="btn btn-secondary" type="button" id="exportStatsButton">Descargar resumen</button>
+            <button class="btn btn-secondary" type="button" id="exportStatsButton">Descargar XLSX</button>
             <button class="btn btn-secondary" type="button" id="printReportButton">Imprimir</button>
         </div>
         <div class="segmented-actions" id="reportScopeButtons">
@@ -411,8 +411,20 @@ function buildFallbackCountMatrix(data) {
         let highlightLabel = null;
         let highlightCount = null;
         let highlightPercentage = null;
+        let optionBreakdown = [];
+        let otherOptions = [];
+        let otherOptionsSummary = 'Sin lectura adicional.';
 
         if (stat?.type === 'choice' && Array.isArray(stat.options) && stat.options.length) {
+            optionBreakdown = stat.options.map((option) => ({
+                label: String(option.label || ''),
+                count: Number(option.count || 0),
+                percentage: Number(option.percentage || 0),
+            })).filter((option) => option.label);
+            otherOptions = optionBreakdown.slice(1);
+            otherOptionsSummary = otherOptions.length
+                ? otherOptions.map((option) => `${option.label} · ${formatPercentage(option.percentage)} (${formatCount(option.count)})`).join(' | ')
+                : 'Sin otras respuestas relevantes.';
             const topOption = stat.options[0];
             highlightLabel = topOption.label || null;
             highlightCount = Number(topOption.count || 0);
@@ -451,6 +463,9 @@ function buildFallbackCountMatrix(data) {
             highlight_label: highlightLabel,
             highlight_count: highlightCount,
             highlight_percentage: highlightPercentage,
+            option_breakdown: optionBreakdown,
+            other_options: otherOptions,
+            other_options_summary: otherOptionsSummary,
             has_activity: Number(item.responses || 0) > 0,
         };
     });
@@ -537,6 +552,49 @@ function buildQuestionHighlight(row) {
     return row?.summary || 'Sin lectura rápida.';
 }
 
+function getQuestionOtherOptions(row) {
+    if (Array.isArray(row?.other_options) && row.other_options.length) {
+        return row.other_options;
+    }
+
+    if (Array.isArray(row?.option_breakdown) && row.option_breakdown.length > 1) {
+        return row.option_breakdown.slice(1);
+    }
+
+    return [];
+}
+
+function buildQuestionOtherAnswersSummary(row) {
+    if (row?.other_options_summary) {
+        return row.other_options_summary;
+    }
+
+    const options = getQuestionOtherOptions(row);
+    if (!options.length) {
+        return row?.option_breakdown?.length ? 'Sin otras respuestas relevantes.' : 'No aplica';
+    }
+
+    return options.map((option) => `${option.label} · ${formatPercentage(option.percentage)} (${formatCount(option.count)})`).join(' | ');
+}
+
+function renderQuestionOtherAnswersHtml(row) {
+    const options = getQuestionOtherOptions(row);
+    if (!options.length) {
+        return `<span class="report-table-muted">${escapeHtml(buildQuestionOtherAnswersSummary(row))}</span>`;
+    }
+
+    return `
+        <div class="report-breakdown-list">
+            ${options.map((option) => `
+                <span class="report-breakdown-pill">
+                    <strong>${escapeHtml(option.label || '')}</strong>
+                    <span>${escapeHtml(formatPercentage(option.percentage))} (${escapeHtml(formatCount(option.count))})</span>
+                </span>
+            `).join('')}
+        </div>
+    `;
+}
+
 function renderTerritorialCountFallback(matrix) {
     const fallback = document.getElementById('territorialCountFallback');
     if (!fallback) {
@@ -610,6 +668,7 @@ function renderQuestionCountFallback(matrix) {
                     <th>Resp.</th>
                     <th>Cobertura</th>
                     <th>Lectura rápida</th>
+                    <th>Otras respuestas</th>
                 </tr>
             </thead>
             <tbody>
@@ -626,6 +685,7 @@ function renderQuestionCountFallback(matrix) {
                         <td>${formatCount(row.responses)}</td>
                         <td>${formatPercentage(row.coverage_percentage)}</td>
                         <td>${escapeHtml(buildQuestionHighlight(row))}</td>
+                        <td>${renderQuestionOtherAnswersHtml(row)}</td>
                     </tr>
                 `).join('')}
             </tbody>
@@ -801,6 +861,12 @@ function renderQuestionCountTable(matrix) {
                 field: 'summary',
                 minWidth: 260,
                 formatter: (cell) => escapeHtml(buildQuestionHighlight(cell.getRow().getData())),
+            },
+            {
+                title: 'Otras respuestas',
+                field: 'other_options_summary',
+                minWidth: 320,
+                formatter: (cell) => renderQuestionOtherAnswersHtml(cell.getRow().getData()),
             },
         ],
     });
@@ -1453,24 +1519,6 @@ function renderReport(data) {
     renderTextInsights(data);
 }
 
-function downloadStats() {
-    if (!lastStatsPayload) {
-        notify('warning', 'Reporte no disponible', 'Actualice el reporte antes de descargar el resumen.');
-        return;
-    }
-
-    const surveyName = document.getElementById('stats_survey_id').selectedOptions[0]?.textContent || 'encuesta';
-    const scopeSuffix = lastStatsPayload?.report_scope === 'special' ? '-reporte-aparte' : '-reporte-principal';
-    const blob = new Blob([JSON.stringify(lastStatsPayload, null, 2)], {type: 'application/json;charset=utf-8'});
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${slugify(surveyName)}${scopeSuffix}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(link.href);
-}
-
 function renderReportEmptyState(message) {
     destroyCharts();
     lastStatsPayload = null;
@@ -1510,6 +1558,52 @@ async function loadStats() {
     setActiveReportScope(result.data.report_scope || document.getElementById('stats_report_scope')?.value || 'primary');
     syncReportUrlState();
     renderReport(lastStatsPayload);
+}
+
+function extractFilenameFromDisposition(disposition, fallback = 'reporte-matriz.xlsx') {
+    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match?.[1]) {
+        return decodeURIComponent(utf8Match[1]);
+    }
+
+    const asciiMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
+    if (asciiMatch?.[1]) {
+        return asciiMatch[1];
+    }
+
+    return fallback;
+}
+
+async function downloadStats() {
+    if (!lastStatsPayload) {
+        notify('warning', 'Reporte no disponible', 'Actualice el reporte antes de descargar la matriz en Excel.');
+        return;
+    }
+
+    const response = await fetch(`<?= url('api/admin/app.php?action=stats_export_xlsx') ?>&${getStatsFilters()}`);
+    const contentType = response.headers.get('content-type') || '';
+
+    if (!response.ok || contentType.includes('application/json')) {
+        let result = null;
+        try {
+            result = await response.json();
+        } catch (error) {
+            // Ignore invalid JSON and use a generic message.
+        }
+
+        notify('error', 'No se pudo descargar el Excel', result?.message || 'Intente nuevamente.');
+        return;
+    }
+
+    const blob = await response.blob();
+    const disposition = response.headers.get('content-disposition') || '';
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = extractFilenameFromDisposition(disposition);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
 }
 
 function bootReportsPage() {
