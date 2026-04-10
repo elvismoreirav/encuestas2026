@@ -1627,8 +1627,8 @@ class SurveyService
         }
 
         if (in_array($type, ['text', 'textarea'], true)) {
-            $value = trim((string) ($answer ?? ''));
-            return $value === '' ? null : [
+            $value = $this->normalizeAnswerTextValue($answer);
+            return $value === null ? null : [
                 'type' => $type === 'textarea' ? 'textarea' : 'text',
                 'text' => $value,
                 'json' => null,
@@ -1637,8 +1637,8 @@ class SurveyService
         }
 
         if (in_array($type, ['single_choice', 'rating'], true)) {
-            $value = trim((string) ($answer ?? ''));
-            if ($value === '' || !isset($optionsByCode[$value])) {
+            $value = $this->normalizeAnswerTextValue($answer);
+            if ($value === null || !isset($optionsByCode[$value])) {
                 return null;
             }
 
@@ -1691,6 +1691,20 @@ class SurveyService
         }
 
         return null;
+    }
+
+    private function normalizeAnswerTextValue(mixed $value): ?string
+    {
+        if ($value === null || is_array($value)) {
+            return null;
+        }
+
+        if (is_object($value) && !method_exists($value, '__toString')) {
+            return null;
+        }
+
+        $normalized = trim((string) $value);
+        return $normalized === '' ? null : $normalized;
     }
 
     private function buildCaptureSummary(array $response): array
