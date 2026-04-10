@@ -160,6 +160,12 @@ let draftSaveTimer = null;
 let lastDraftSavedAt = null;
 let draftWasRestored = false;
 let isSubmitting = false;
+let stickyActionObserver = null;
+
+function surveyAllowsMultipleSubmissions() {
+    const value = surveyData?.settings?.allow_multiple_submissions;
+    return value === true || value === 1 || value === '1';
+}
 
 function defaultFormMessage() {
     if (surveyData.window_status === 'closing_soon') {
@@ -392,22 +398,13 @@ function restoreDraft() {
         sessionToken: typeof savedDraft.sessionToken === 'string' && savedDraft.sessionToken !== '' ? savedDraft.sessionToken : generateSessionToken(),
     };
 
-    if (normalizedDraft.draftId === currentDraftId) {
-        answers = normalizedDraft.answers;
-        currentStep = normalizedDraft.currentStep;
-        startedAt = normalizedDraft.startedAt;
-        lastDraftSavedAt = normalizedDraft.savedAt;
-        draftWasRestored = true;
-        setSurveySessionToken(normalizedDraft.sessionToken);
-        formMessage = buildDraftRestoreMessage({
-            surveyUpdated: normalizedDraft.surveyUpdated,
-            adjusted: normalizedDraft.adjusted,
-        });
-        return;
-    }
-
     resetResponseState();
     pendingDraftRecovery = normalizedDraft;
+    formMessage = {
+        type: 'info',
+        title: 'Se detectó un borrador previo',
+        message: 'Antes de continuar, confirme si desea recuperar ese borrador o iniciar una encuesta nueva en este dispositivo.',
+    };
 }
 
 function formatSavedAt(value) {
@@ -721,6 +718,45 @@ function getQuestionErrorConfig(questionCode) {
 
 function isCompactSurveyViewport() {
     return inferDeviceType() === 'mobile' || window.innerWidth <= 768;
+}
+
+function clearSurveyLayoutOffsets() {
+    surveyApp?.style?.setProperty('--survey-sticky-actions-space', '0px');
+}
+
+function syncSurveyLayoutOffsets() {
+    const form = document.getElementById('publicSurveyForm');
+    const actionShell = form?.querySelector('.form-actions-shell');
+
+    if (!form || !actionShell || !isCompactSurveyViewport()) {
+        clearSurveyLayoutOffsets();
+        return;
+    }
+
+    const actionShellStyles = window.getComputedStyle(actionShell);
+    const bottomOffset = parseFloat(actionShellStyles.bottom || '0') || 0;
+    const stickySpace = Math.ceil(actionShell.getBoundingClientRect().height + bottomOffset + 20);
+    surveyApp?.style?.setProperty('--survey-sticky-actions-space', `${stickySpace}px`);
+}
+
+function disconnectStickyActionObserver() {
+    stickyActionObserver?.disconnect();
+    stickyActionObserver = null;
+}
+
+function observeStickyActionShell() {
+    disconnectStickyActionObserver();
+    syncSurveyLayoutOffsets();
+
+    const actionShell = document.querySelector('#publicSurveyForm .form-actions-shell');
+    if (!actionShell || typeof window.ResizeObserver !== 'function') {
+        return;
+    }
+
+    stickyActionObserver = new window.ResizeObserver(() => {
+        syncSurveyLayoutOffsets();
+    });
+    stickyActionObserver.observe(actionShell);
 }
 
 function getMatrixConfig(question) {
@@ -1618,6 +1654,8 @@ function renderForm(options = {}) {
     pruneInvisibleAnswers();
     const sections = getVisibleSections();
     if (!sections.length) {
+        disconnectStickyActionObserver();
+        clearSurveyLayoutOffsets();
         surveyApp.innerHTML = '<div class="empty-state">No hay preguntas visibles para esta encuesta en este momento.</div>';
         return;
     }
@@ -1652,6 +1690,7 @@ function renderForm(options = {}) {
     `;
 
     bindFormEvents(section);
+    observeStickyActionShell();
     restoreQuestionViewport(viewportSnapshot);
 
     const currentVisibleCodes = getVisibleQuestionCodesSet();
@@ -1689,12 +1728,41 @@ function renderSurveyExperience(options = {}) {
         return;
     }
 
+    disconnectStickyActionObserver();
+    clearSurveyLayoutOffsets();
     surveyStepper.innerHTML = '';
     surveyApp.innerHTML = `
         <div id="surveyMessage" aria-live="polite">${renderFormMessage()}</div>
         ${renderDraftRecoveryGate()}
     `;
     bindDraftRecoveryEvents();
+}
+
+function renderSubmissionSuccess(message) {
+    const canRespondAgain = surveyAllowsMultipleSubmissions();
+
+    surveyApp.innerHTML = `
+        <div class="hero-card">
+            <span class="chip chip-success">Respuesta registrada</span>
+            <div>
+                <h2>Gracias por participar</h2>
+                <p>${escapeHtml(message)}</p>
+            </div>
+            <div class="actions-inline">
+                ${canRespondAgain ? '<button class="btn btn-primary" type="button" id="respondAgainButton">Registrar otra respuesta</button>' : ''}
+                <a class="btn btn-secondary" href="<?= url('public/index.php') ?>">Ver otras encuestas</a>
+            </div>
+            ${canRespondAgain ? '<p class="draft-recovery-note">El dispositivo quedó libre de respuestas anteriores. Use esta opción para registrar al siguiente encuestado sin mezclar información.</p>' : ''}
+        </div>
+    `;
+
+    document.getElementById('respondAgainButton')?.addEventListener('click', () => {
+        startFreshSurveyResponse({
+            type: 'info',
+            title: 'Nueva respuesta iniciada',
+            message: 'El formulario quedó listo para registrar una nueva respuesta en este dispositivo.',
+        });
+    });
 }
 
 function bindFormEvents(section) {
@@ -1923,18 +1991,9 @@ function bindFormEvents(section) {
             rotateSurveySessionToken();
             pendingDraftRecovery = null;
             draftWasRestored = false;
-            surveyApp.innerHTML = `
-                <div class="hero-card">
-                    <span class="chip chip-success">Respuesta registrada</span>
-                    <div>
-                        <h2>Gracias por participar</h2>
-                        <p>${escapeHtml(result.message)}</p>
-                    </div>
-                    <div class="actions-inline">
-                        <a class="btn btn-secondary" href="<?= url('public/index.php') ?>">Ver otras encuestas</a>
-                    </div>
-                </div>
-            `;
+            renderSubmissionSuccess(result.message);
+            disconnectStickyActionObserver();
+            clearSurveyLayoutOffsets();
             window.scrollTo({top: 0, behavior: 'smooth'});
         } catch (error) {
             isSubmitting = false;
@@ -1953,6 +2012,7 @@ window.addEventListener('beforeunload', (event) => {
         event.preventDefault();
     }
 });
+window.addEventListener('resize', syncSurveyLayoutOffsets);
 trackSurveyAccess();
 renderSurveyExperience({alignActiveStep: true});
 </script>
