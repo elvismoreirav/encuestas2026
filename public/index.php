@@ -147,8 +147,13 @@ let answers = {};
 let invalidQuestions = new Set();
 let questionErrors = {};
 let startedAt = new Date().toISOString();
-const surveySessionToken = ensureSurveySessionToken();
+const surveySessionStorageKey = `shalom-survey-session:${surveyData.slug}`;
 const surveyDraftKey = `shalom-survey-draft:${surveyData.slug}`;
+const surveyDraftSessionKey = `shalom-survey-draft-active:${surveyData.slug}`;
+const DRAFT_RECOVERY_WINDOW_MS = 12 * 60 * 60 * 1000;
+let surveySessionToken = ensureSurveySessionToken();
+let currentDraftId = ensureActiveDraftId();
+let pendingDraftRecovery = null;
 let accessTracked = false;
 let formMessage = defaultFormMessage();
 let draftSaveTimer = null;
@@ -186,21 +191,79 @@ function generateSessionToken() {
     return `sess-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
-function ensureSurveySessionToken() {
-    const storageKey = `shalom-survey-session:${surveyData.slug}`;
+function generateDraftId() {
+    return `draft-${generateSessionToken()}`;
+}
 
+function ensureSurveySessionToken() {
     try {
-        const existing = window.sessionStorage.getItem(storageKey);
+        const existing = window.sessionStorage.getItem(surveySessionStorageKey);
         if (existing) {
             return existing;
         }
 
         const token = generateSessionToken();
-        window.sessionStorage.setItem(storageKey, token);
+        window.sessionStorage.setItem(surveySessionStorageKey, token);
         return token;
     } catch (error) {
         return generateSessionToken();
     }
+}
+
+function setSurveySessionToken(token) {
+    surveySessionToken = token || generateSessionToken();
+
+    try {
+        window.sessionStorage.setItem(surveySessionStorageKey, surveySessionToken);
+    } catch (error) {
+        // Session storage should not block the survey.
+    }
+}
+
+function rotateSurveySessionToken() {
+    setSurveySessionToken(generateSessionToken());
+}
+
+function ensureActiveDraftId() {
+    try {
+        const existing = window.sessionStorage.getItem(surveyDraftSessionKey);
+        if (existing) {
+            return existing;
+        }
+
+        const draftId = generateDraftId();
+        window.sessionStorage.setItem(surveyDraftSessionKey, draftId);
+        return draftId;
+    } catch (error) {
+        return generateDraftId();
+    }
+}
+
+function setActiveDraftId(draftId) {
+    currentDraftId = draftId || generateDraftId();
+
+    try {
+        window.sessionStorage.setItem(surveyDraftSessionKey, currentDraftId);
+    } catch (error) {
+        // Session storage should not block the survey.
+    }
+}
+
+function rotateActiveDraftId() {
+    setActiveDraftId(generateDraftId());
+}
+
+function isDraftExpired(savedAt) {
+    if (typeof savedAt !== 'string' || savedAt.trim() === '') {
+        return false;
+    }
+
+    const savedAtMs = Date.parse(savedAt);
+    if (!Number.isFinite(savedAtMs)) {
+        return false;
+    }
+
+    return (Date.now() - savedAtMs) > DRAFT_RECOVERY_WINDOW_MS;
 }
 
 function readDraft() {
@@ -211,7 +274,16 @@ function readDraft() {
         }
 
         const parsedDraft = JSON.parse(rawDraft);
-        return parsedDraft && typeof parsedDraft === 'object' ? parsedDraft : null;
+        if (!parsedDraft || typeof parsedDraft !== 'object') {
+            return null;
+        }
+
+        if (isDraftExpired(parsedDraft.savedAt ?? null)) {
+            window.localStorage.removeItem(surveyDraftKey);
+            return null;
+        }
+
+        return parsedDraft;
     } catch (error) {
         return null;
     }
@@ -226,6 +298,9 @@ function persistDraftNow() {
             currentStep,
             startedAt,
             savedAt: lastDraftSavedAt,
+            surveyUpdatedAt: surveyData.updated_at || null,
+            draftId: currentDraftId,
+            sessionToken: surveySessionToken,
         }));
     } catch (error) {
         // Draft persistence should never block the form.
@@ -249,6 +324,38 @@ function clearDraft() {
     lastDraftSavedAt = null;
 }
 
+function buildDraftRestoreMessage({surveyUpdated = false, adjusted = false} = {}) {
+    return surveyUpdated || adjusted
+        ? {
+            type: 'warning',
+            title: 'Se actualizó la encuesta',
+            message: 'Se recuperó su progreso, pero algunas respuestas guardadas fueron ajustadas para coincidir con la versión vigente del formulario.',
+        }
+        : {
+            type: 'info',
+            title: 'Se recuperó su progreso',
+            message: 'Puede continuar desde el último avance guardado en este dispositivo.',
+        };
+}
+
+function resetResponseState() {
+    answers = {};
+    invalidQuestions = new Set();
+    questionErrors = {};
+    currentStep = 0;
+    startedAt = new Date().toISOString();
+    lastDraftSavedAt = null;
+    draftWasRestored = false;
+}
+
+function countStoredDraftAnswers(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+        return 0;
+    }
+
+    return Object.keys(snapshot).length;
+}
+
 function restoreDraft() {
     const savedDraft = readDraft();
     if (!savedDraft) {
@@ -259,24 +366,48 @@ function restoreDraft() {
         answers = savedDraft.answers;
     }
 
-    if (Number.isInteger(savedDraft.currentStep)) {
-        currentStep = savedDraft.currentStep;
+    const sanitizedDraft = sanitizeAnswersSnapshot(answers);
+    const draftSurveyUpdatedAt = typeof savedDraft.surveyUpdatedAt === 'string' && savedDraft.surveyUpdatedAt !== ''
+        ? savedDraft.surveyUpdatedAt
+        : null;
+    const surveyUpdated = draftSurveyUpdatedAt !== null
+        && typeof surveyData.updated_at === 'string'
+        && surveyData.updated_at !== ''
+        && draftSurveyUpdatedAt !== surveyData.updated_at;
+    const sanitizedAnswerCount = countStoredDraftAnswers(sanitizedDraft.answers);
+
+    if (sanitizedAnswerCount === 0) {
+        clearDraft();
+        return;
     }
 
-    if (typeof savedDraft.startedAt === 'string' && savedDraft.startedAt !== '') {
-        startedAt = savedDraft.startedAt;
-    }
-
-    if (typeof savedDraft.savedAt === 'string' && savedDraft.savedAt !== '') {
-        lastDraftSavedAt = savedDraft.savedAt;
-    }
-
-    draftWasRestored = true;
-    formMessage = {
-        type: 'info',
-        title: 'Se recuperó su progreso',
-        message: 'Puede continuar desde el último avance guardado en este dispositivo.',
+    const normalizedDraft = {
+        answers: sanitizedDraft.answers,
+        currentStep: Number.isInteger(savedDraft.currentStep) ? savedDraft.currentStep : 0,
+        startedAt: typeof savedDraft.startedAt === 'string' && savedDraft.startedAt !== '' ? savedDraft.startedAt : startedAt,
+        savedAt: typeof savedDraft.savedAt === 'string' && savedDraft.savedAt !== '' ? savedDraft.savedAt : null,
+        surveyUpdated,
+        adjusted: sanitizedDraft.changed,
+        draftId: typeof savedDraft.draftId === 'string' && savedDraft.draftId !== '' ? savedDraft.draftId : generateDraftId(),
+        sessionToken: typeof savedDraft.sessionToken === 'string' && savedDraft.sessionToken !== '' ? savedDraft.sessionToken : generateSessionToken(),
     };
+
+    if (normalizedDraft.draftId === currentDraftId) {
+        answers = normalizedDraft.answers;
+        currentStep = normalizedDraft.currentStep;
+        startedAt = normalizedDraft.startedAt;
+        lastDraftSavedAt = normalizedDraft.savedAt;
+        draftWasRestored = true;
+        setSurveySessionToken(normalizedDraft.sessionToken);
+        formMessage = buildDraftRestoreMessage({
+            surveyUpdated: normalizedDraft.surveyUpdated,
+            adjusted: normalizedDraft.adjusted,
+        });
+        return;
+    }
+
+    resetResponseState();
+    pendingDraftRecovery = normalizedDraft;
 }
 
 function formatSavedAt(value) {
@@ -294,6 +425,37 @@ function formatSavedAt(value) {
     } catch (error) {
         return '';
     }
+}
+
+function renderDraftRecoveryGate() {
+    if (!pendingDraftRecovery) {
+        return '';
+    }
+
+    const savedAtLabel = pendingDraftRecovery.savedAt ? formatSavedAt(pendingDraftRecovery.savedAt) : 'hace un momento';
+    const answerCount = countStoredDraftAnswers(pendingDraftRecovery.answers);
+    const stateChip = pendingDraftRecovery.surveyUpdated || pendingDraftRecovery.adjusted
+        ? '<span class="chip chip-warning">Se ajustará a la versión vigente</span>'
+        : '<span class="chip chip-success">Borrador recuperable</span>';
+
+    return `
+        <div class="hero-card draft-recovery-card">
+            <div class="hero-meta">
+                ${stateChip}
+                <span class="chip chip-muted">Último guardado ${escapeHtml(savedAtLabel)}</span>
+                <span class="chip chip-muted">${answerCount} respuestas válidas guardadas</span>
+            </div>
+            <div>
+                <h2>Se encontró un borrador en este dispositivo</h2>
+                <p>En equipos compartidos no conviene recuperar automáticamente la última encuesta. Elija si desea continuar ese borrador o empezar una respuesta nueva.</p>
+            </div>
+            <div class="actions-inline">
+                <button class="btn btn-primary" type="button" id="resumeDraftButton">Continuar borrador</button>
+                <button class="btn btn-secondary" type="button" id="startFreshResponseButton">Empezar nueva encuesta</button>
+            </div>
+            <p class="draft-recovery-note">Si este teléfono o computador lo usa otra persona, seleccione <strong>Empezar nueva encuesta</strong> para evitar mezclar respuestas.</p>
+        </div>
+    `;
 }
 
 function inferDeviceType() {
@@ -407,8 +569,12 @@ function pruneInvisibleAnswers() {
         }
     }
 
-    if (changed && invalidQuestions.size === 0 && formMessage?.type === 'danger') {
-        formMessage = defaultFormMessage();
+    if (changed && formMessage?.type === 'danger') {
+        if (invalidQuestions.size === 0) {
+            formMessage = defaultFormMessage();
+        } else {
+            refreshValidationFormMessage();
+        }
     }
 
     return changed;
@@ -420,6 +586,28 @@ function shouldRefreshForVisibility(questionCode) {
 
 function setFormMessage(type, title, message) {
     formMessage = {type, title, message};
+    updateFormMessage();
+}
+
+function refreshValidationFormMessage() {
+    if (formMessage?.type !== 'danger') {
+        return;
+    }
+
+    if (invalidQuestions.size === 0) {
+        formMessage = defaultFormMessage();
+        updateFormMessage();
+        return;
+    }
+
+    if (!['Faltan respuestas obligatorias', 'No fue posible registrar la encuesta'].includes(formMessage.title)) {
+        return;
+    }
+
+    formMessage = {
+        ...formMessage,
+        details: buildMissingQuestionDetails(Array.from(invalidQuestions)),
+    };
     updateFormMessage();
 }
 
@@ -495,28 +683,373 @@ function shortText(value, limit = 52) {
 }
 
 function buildMissingQuestionDetails(codes) {
-    return codes.map((code) => questionTitle(code));
+    return codes.map((code) => {
+        const errorConfig = getQuestionErrorConfig(code);
+        return errorConfig.message ? `${questionTitle(code)}: ${errorConfig.message}` : questionTitle(code);
+    });
+}
+
+function getQuestionErrorConfig(questionCode) {
+    const fallbackMessage = 'Debe completar esta pregunta para continuar.';
+    const error = questionErrors[questionCode];
+
+    if (!error) {
+        return {message: fallbackMessage, details: [], meta: {}};
+    }
+
+    if (typeof error === 'string') {
+        const message = error.trim();
+        return {message: message || fallbackMessage, details: [], meta: {}};
+    }
+
+    if (typeof error === 'object') {
+        const message = typeof error.message === 'string' && error.message.trim() !== ''
+            ? error.message.trim()
+            : fallbackMessage;
+
+        return {
+            message,
+            details: Array.isArray(error.details)
+                ? error.details.filter((detail) => typeof detail === 'string' && detail.trim() !== '')
+                : [],
+            meta: error.meta && typeof error.meta === 'object' ? error.meta : {},
+        };
+    }
+
+    return {message: fallbackMessage, details: [], meta: {}};
+}
+
+function isCompactSurveyViewport() {
+    return inferDeviceType() === 'mobile' || window.innerWidth <= 768;
+}
+
+function getMatrixConfig(question) {
+    const matrix = question.settings?.matrix || {};
+    return {
+        rows: Array.isArray(matrix.rows) ? matrix.rows : [],
+        dimensions: Array.isArray(matrix.dimensions) ? matrix.dimensions : [],
+    };
+}
+
+function getMatrixMissingSelections(question, value = answers[question.code]) {
+    const {rows, dimensions} = getMatrixConfig(question);
+    const matrixAnswers = value && typeof value === 'object' ? value : {};
+    const missing = [];
+
+    rows.forEach((row) => {
+        dimensions.forEach((dimension) => {
+            if (matrixAnswers?.[row.code]?.[dimension.code]) {
+                return;
+            }
+
+            missing.push({
+                key: `${row.code}::${dimension.code}`,
+                rowCode: row.code,
+                rowLabel: row.label || row.code,
+                dimensionCode: dimension.code,
+                dimensionLabel: dimension.label || dimension.code,
+            });
+        });
+    });
+
+    return missing;
+}
+
+function getQuestionOptionCodes(question) {
+    return new Set(
+        (Array.isArray(question.options) ? question.options : [])
+            .map((option) => String(option.code ?? '').trim())
+            .filter((code) => code !== '')
+    );
+}
+
+function isValidSingleChoiceAnswer(question, value) {
+    if (value === null || value === undefined || Array.isArray(value)) {
+        return false;
+    }
+
+    const normalized = String(value).trim();
+    if (normalized === '') {
+        return false;
+    }
+
+    return getQuestionOptionCodes(question).has(normalized);
+}
+
+function sanitizeMatrixAnswer(question, value) {
+    const {rows, dimensions} = getMatrixConfig(question);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+
+    const nextValue = {};
+
+    rows.forEach((row) => {
+        const rowValue = value[row.code];
+        if (!rowValue || typeof rowValue !== 'object' || Array.isArray(rowValue)) {
+            return;
+        }
+
+        dimensions.forEach((dimension) => {
+            const selected = rowValue[dimension.code];
+            if (selected === null || selected === undefined || Array.isArray(selected)) {
+                return;
+            }
+
+            const normalized = String(selected).trim();
+            if (normalized === '') {
+                return;
+            }
+
+            const dimensionOptionCodes = new Set(
+                (Array.isArray(dimension.options) ? dimension.options : [])
+                    .map((option) => String(option.code ?? '').trim())
+                    .filter((code) => code !== '')
+            );
+
+            if (!dimensionOptionCodes.has(normalized)) {
+                return;
+            }
+
+            nextValue[row.code] = nextValue[row.code] || {};
+            nextValue[row.code][dimension.code] = normalized;
+        });
+    });
+
+    return Object.keys(nextValue).length ? nextValue : null;
+}
+
+function sanitizeAnswerForQuestion(question, value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    if (question.question_type === 'single_choice' || question.question_type === 'rating') {
+        return isValidSingleChoiceAnswer(question, value) ? String(value).trim() : null;
+    }
+
+    if (question.question_type === 'multiple_choice') {
+        if (!Array.isArray(value)) {
+            return null;
+        }
+
+        const validCodes = getQuestionOptionCodes(question);
+        const selected = Array.from(new Set(
+            value
+                .filter((item) => item !== null && item !== undefined && !Array.isArray(item))
+                .map((item) => String(item).trim())
+                .filter((item) => item !== '' && validCodes.has(item))
+        ));
+
+        return selected.length ? selected : null;
+    }
+
+    if (question.question_type === 'matrix') {
+        return sanitizeMatrixAnswer(question, value);
+    }
+
+    if (typeof value === 'object') {
+        return null;
+    }
+
+    const normalized = String(value).trim();
+    return normalized === '' ? null : normalized;
+}
+
+function sanitizeAnswersSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+        return {answers: {}, changed: false};
+    }
+
+    const nextAnswers = {};
+    let changed = false;
+
+    Object.entries(snapshot).forEach(([questionCode, value]) => {
+        const question = questionLookup[questionCode];
+        if (!question) {
+            changed = true;
+            return;
+        }
+
+        const sanitized = sanitizeAnswerForQuestion(question, value);
+        if (sanitized === null) {
+            if (value !== null && value !== undefined && value !== '') {
+                changed = true;
+            }
+            return;
+        }
+
+        nextAnswers[questionCode] = sanitized;
+        if (JSON.stringify(sanitized) !== JSON.stringify(value)) {
+            changed = true;
+        }
+    });
+
+    return {answers: nextAnswers, changed};
+}
+
+function applyRecoveredDraft(draft) {
+    if (!draft) {
+        return;
+    }
+
+    answers = draft.answers;
+    invalidQuestions = new Set();
+    questionErrors = {};
+    currentStep = Number.isInteger(draft.currentStep) ? draft.currentStep : 0;
+    startedAt = draft.startedAt || new Date().toISOString();
+    lastDraftSavedAt = draft.savedAt || null;
+    draftWasRestored = true;
+    pendingDraftRecovery = null;
+    setActiveDraftId(draft.draftId);
+    setSurveySessionToken(draft.sessionToken);
+    formMessage = buildDraftRestoreMessage({
+        surveyUpdated: draft.surveyUpdated,
+        adjusted: draft.adjusted,
+    });
+}
+
+function startFreshSurveyResponse(messageConfig = null) {
+    pendingDraftRecovery = null;
+    clearDraft();
+    rotateActiveDraftId();
+    rotateSurveySessionToken();
+    resetResponseState();
+    formMessage = messageConfig || {
+        type: 'info',
+        title: 'Nueva encuesta iniciada',
+        message: 'El dispositivo quedó listo para registrar una respuesta nueva sin mezclar el borrador anterior.',
+    };
+    renderForm({alignActiveStep: true});
+    window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+function validateRequiredQuestion(question) {
+    const value = answers[question.code];
+
+    if (question.question_type === 'multiple_choice') {
+        const validSelections = sanitizeAnswerForQuestion(question, value);
+        const valid = Array.isArray(validSelections) && validSelections.length > 0;
+        return valid
+            ? {valid: true}
+            : {
+                valid: false,
+                error: {
+                    message: 'Seleccione al menos una opción.',
+                    details: [],
+                    meta: {},
+                },
+            };
+    }
+
+    if (question.question_type === 'matrix') {
+        const {rows, dimensions} = getMatrixConfig(question);
+        if (!rows.length || !dimensions.length) {
+            return {
+                valid: false,
+                error: {
+                    message: 'La matriz no pudo validarse correctamente. Recargue la página e intente nuevamente.',
+                    details: [],
+                    meta: {},
+                },
+            };
+        }
+
+        const missing = getMatrixMissingSelections(question, value);
+        if (missing.length === 0) {
+            return {valid: true};
+        }
+
+        const affectedRows = new Set(missing.map((item) => item.rowCode)).size;
+        const compact = isCompactSurveyViewport();
+        const details = missing.map((item) => (
+            compact
+                ? `${item.rowLabel}: ${item.dimensionLabel}`
+                : `${item.rowLabel} -> ${item.dimensionLabel}`
+        ));
+
+        return {
+            valid: false,
+            error: {
+                message: compact
+                    ? `Faltan ${missing.length} selecciones en ${affectedRows} ${affectedRows === 1 ? 'personaje' : 'personajes'}. Revise los bloques marcados debajo.`
+                    : `Faltan ${missing.length} cruces por responder en la matriz.`,
+                details,
+                meta: {
+                    missingMatrixItems: missing,
+                },
+            },
+        };
+    }
+
+    if (question.question_type === 'single_choice' || question.question_type === 'rating') {
+        return isValidSingleChoiceAnswer(question, value)
+            ? {valid: true}
+            : {
+                valid: false,
+                error: {
+                    message: 'Seleccione una opción válida para continuar.',
+                    details: [],
+                    meta: {},
+                },
+            };
+    }
+
+    const valid = value !== undefined && value !== null && String(value).trim() !== '';
+    return valid
+        ? {valid: true}
+        : {
+            valid: false,
+            error: {
+                message: 'Esta pregunta es obligatoria y aún no ha sido respondida.',
+                details: [],
+                meta: {},
+            },
+        };
 }
 
 function questionHasAnswer(question) {
     const value = answers[question.code];
 
     if (question.question_type === 'multiple_choice') {
-        return Array.isArray(value) && value.length > 0;
+        const validSelections = sanitizeAnswerForQuestion(question, value);
+        return Array.isArray(validSelections) && validSelections.length > 0;
+    }
+
+    if (question.question_type === 'single_choice' || question.question_type === 'rating') {
+        return isValidSingleChoiceAnswer(question, value);
     }
 
     if (question.question_type === 'matrix') {
-        const rows = question.settings?.matrix?.rows || [];
-        const dimensions = question.settings?.matrix?.dimensions || [];
+        const {rows, dimensions} = getMatrixConfig(question);
 
         if (!rows.length || !dimensions.length) {
             return false;
         }
 
-        return rows.every((row) => dimensions.every((dimension) => !!answers[question.code]?.[row.code]?.[dimension.code]));
+        return getMatrixMissingSelections(question, value).length === 0;
     }
 
     return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function detectSurveyStructureMismatch(serverErrors) {
+    const codes = Object.keys(serverErrors || {});
+    const unknownCodes = codes.filter((code) => !questionLookup[code]);
+    const locallyAnsweredCodes = codes.filter((code) => {
+        const question = questionLookup[code];
+        if (!question || !question.is_required) {
+            return false;
+        }
+
+        return questionHasAnswer(question) && validateRequiredQuestion(question).valid;
+    });
+
+    return {
+        unknownCodes,
+        locallyAnsweredCodes,
+        hasMismatch: unknownCodes.length > 0 || locallyAnsweredCodes.length > 0,
+    };
 }
 
 function getSectionProgress(section) {
@@ -731,6 +1264,16 @@ function getQuestionCard(questionCode) {
     return Array.from(document.querySelectorAll('[data-question]')).find((element) => element.dataset.question === questionCode) || null;
 }
 
+function scrollToQuestionValidationTarget(questionCode) {
+    const card = getQuestionCard(questionCode);
+    if (!card) {
+        return;
+    }
+
+    const target = card.querySelector('.matrix-error-summary, .matrix-cell.is-missing, .question-error') || card;
+    target.scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+
 function captureQuestionViewport(questionCode) {
     const card = getQuestionCard(questionCode);
     if (!card) {
@@ -798,21 +1341,23 @@ function renderStepper(sections, options = {}) {
     });
 }
 
-function clearQuestionState(questionCode) {
-    if (!invalidQuestions.has(questionCode)) {
-        return;
+function syncQuestionValidationState(questionCode) {
+    const question = questionLookup[questionCode];
+    if (!question || !question.is_required || !isQuestionVisible(question)) {
+        invalidQuestions.delete(questionCode);
+        delete questionErrors[questionCode];
+    } else {
+        const validation = validateRequiredQuestion(question);
+        if (validation.valid) {
+            invalidQuestions.delete(questionCode);
+            delete questionErrors[questionCode];
+        } else {
+            invalidQuestions.add(questionCode);
+            questionErrors[questionCode] = validation.error;
+        }
     }
 
-    invalidQuestions.delete(questionCode);
-    delete questionErrors[questionCode];
-    const card = getQuestionCard(questionCode);
-    card?.classList.remove('is-invalid');
-    card?.querySelector('.question-error')?.remove();
-
-    if (invalidQuestions.size === 0 && formMessage?.type === 'danger') {
-        formMessage = defaultFormMessage();
-        updateFormMessage();
-    }
+    refreshValidationFormMessage();
 }
 
 function renderChoiceCard(question, option, config = {}) {
@@ -879,12 +1424,27 @@ function renderMultipleChoice(question) {
     `;
 }
 
-function renderMatrix(question) {
+function renderMatrix(question, errorConfig = getQuestionErrorConfig(question.code)) {
     const matrix = question.settings?.matrix || {rows: [], dimensions: []};
     const gridStyle = `style="grid-template-columns: 220px repeat(${matrix.dimensions.length}, minmax(0, 1fr));"`;
+    const missingItems = Array.isArray(errorConfig.meta?.missingMatrixItems) ? errorConfig.meta.missingMatrixItems : [];
+    const missingKeys = new Set(missingItems.map((item) => item.key));
+    const missingByRow = missingItems.reduce((carry, item) => {
+        carry[item.rowCode] = carry[item.rowCode] || [];
+        carry[item.rowCode].push(item);
+        return carry;
+    }, {});
 
     return `
         <div class="matrix-shell">
+            ${missingItems.length ? `
+                <div class="matrix-error-summary" role="alert">
+                    <strong>${escapeHtml(errorConfig.message)}</strong>
+                    <ul class="matrix-error-list">
+                        ${errorConfig.details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join('')}
+                    </ul>
+                </div>
+            ` : ''}
             <div class="matrix-helper">
                 <span class="chip chip-muted">1 fila corresponde a 1 personaje político</span>
                 <span class="chip chip-muted">Seleccione una opción en cada columna</span>
@@ -895,13 +1455,23 @@ function renderMatrix(question) {
             </div>
             <div class="matrix-rows">
                 ${matrix.rows.map((row, rowIndex) => `
+                    ${(() => {
+                        const rowMissing = missingByRow[row.code] || [];
+                        return `
                     <div class="matrix-table-row" ${gridStyle}>
-                        <div class="matrix-candidate">
+                        <div class="matrix-candidate ${rowMissing.length ? 'is-missing' : ''}">
                             <span class="matrix-order">${String(rowIndex + 1).padStart(2, '0')}</span>
                             <strong>${escapeHtml(row.label)}</strong>
+                            ${rowMissing.length ? `
+                                <span class="matrix-row-status matrix-row-status-pending">
+                                    ${rowMissing.length} ${rowMissing.length === 1 ? 'pendiente' : 'pendientes'}
+                                </span>
+                            ` : ''}
                         </div>
-                        ${matrix.dimensions.map((dimension) => `
-                            <div class="matrix-cell">
+                        ${matrix.dimensions.map((dimension) => {
+                            const cellMissing = missingKeys.has(`${row.code}::${dimension.code}`);
+                            return `
+                            <div class="matrix-cell ${cellMissing ? 'is-missing' : ''}">
                                 <span class="matrix-cell-label">${escapeHtml(dimension.label)}</span>
                                 <div class="matrix-options">
                                     ${(dimension.options || []).map((option, optionIndex) => `
@@ -915,6 +1485,7 @@ function renderMatrix(question) {
                                                 data-matrix-question="${escapeHtml(question.code)}"
                                                 data-row="${escapeHtml(row.code)}"
                                                 data-dimension="${escapeHtml(dimension.code)}"
+                                                aria-invalid="${cellMissing ? 'true' : 'false'}"
                                                 ${answers[question.code]?.[row.code]?.[dimension.code] === option.code ? 'checked' : ''}
                                             >
                                             <span class="matrix-option-badge">${String.fromCharCode(65 + optionIndex)}</span>
@@ -922,9 +1493,13 @@ function renderMatrix(question) {
                                         </label>
                                     `).join('')}
                                 </div>
+                                ${cellMissing ? `<span class="matrix-cell-error">Falta seleccionar una opción para ${escapeHtml(dimension.label)}.</span>` : ''}
                             </div>
-                        `).join('')}
+                        `;
+                        }).join('')}
                     </div>
+                `;
+                    })()}
                 `).join('')}
             </div>
         </div>
@@ -935,6 +1510,7 @@ function renderQuestion(question) {
     let body = '';
     const isInvalid = invalidQuestions.has(question.code);
     const isComplete = questionHasAnswer(question);
+    const errorConfig = getQuestionErrorConfig(question.code);
     const guidance = getQuestionInteractionHint(question);
     const structureHint = getQuestionStructureHint(question);
 
@@ -943,7 +1519,7 @@ function renderQuestion(question) {
     } else if (question.question_type === 'multiple_choice') {
         body = renderMultipleChoice(question);
     } else if (question.question_type === 'matrix') {
-        body = renderMatrix(question);
+        body = renderMatrix(question, errorConfig);
     } else {
         const tag = question.question_type === 'textarea' ? 'textarea' : 'input';
         const value = answers[question.code] ?? '';
@@ -977,7 +1553,16 @@ function renderQuestion(question) {
                 </div>
             </div>
             ${body}
-            ${isInvalid ? `<div class="question-error">${escapeHtml(questionErrors[question.code] || 'Debe completar esta pregunta para continuar.')}</div>` : ''}
+            ${isInvalid ? `
+                <div class="question-error">
+                    <strong>${escapeHtml(errorConfig.message)}</strong>
+                    ${question.question_type !== 'matrix' && errorConfig.details.length ? `
+                        <ul class="question-error-list">
+                            ${errorConfig.details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join('')}
+                        </ul>
+                    ` : ''}
+                </div>
+            ` : ''}
         </article>
     `;
 }
@@ -990,22 +1575,10 @@ function validateStep(section) {
     for (const question of section.questions) {
         if (!question.is_required) continue;
 
-        const value = answers[question.code];
-        let valid = true;
-
-        if (question.question_type === 'multiple_choice') {
-            valid = Array.isArray(value) && value.length > 0;
-        } else if (question.question_type === 'matrix') {
-            const rows = question.settings?.matrix?.rows || [];
-            const dimensions = question.settings?.matrix?.dimensions || [];
-            valid = rows.every((row) => dimensions.every((dimension) => !!answers[question.code]?.[row.code]?.[dimension.code]));
-        } else {
-            valid = value !== undefined && value !== null && String(value).trim() !== '';
-        }
-
-        if (!valid) {
+        const validation = validateRequiredQuestion(question);
+        if (!validation.valid) {
             nextInvalidQuestions.add(question.code);
-            nextQuestionErrors[question.code] = 'Esta pregunta es obligatoria y aún no ha sido respondida.';
+            nextQuestionErrors[question.code] = validation.error;
             if (!firstInvalid) {
                 firstInvalid = question.code;
             }
@@ -1024,7 +1597,7 @@ function validateStep(section) {
         };
         renderForm();
         requestAnimationFrame(() => {
-            getQuestionCard(firstInvalid)?.scrollIntoView({behavior: 'smooth', block: 'center'});
+            scrollToQuestionValidationTarget(firstInvalid);
         });
         return false;
     }
@@ -1098,6 +1671,32 @@ function renderForm(options = {}) {
     }
 }
 
+function bindDraftRecoveryEvents() {
+    document.getElementById('resumeDraftButton')?.addEventListener('click', () => {
+        applyRecoveredDraft(pendingDraftRecovery);
+        renderForm({alignActiveStep: true});
+        window.scrollTo({top: 0, behavior: 'smooth'});
+    });
+
+    document.getElementById('startFreshResponseButton')?.addEventListener('click', () => {
+        startFreshSurveyResponse();
+    });
+}
+
+function renderSurveyExperience(options = {}) {
+    if (!pendingDraftRecovery) {
+        renderForm(options);
+        return;
+    }
+
+    surveyStepper.innerHTML = '';
+    surveyApp.innerHTML = `
+        <div id="surveyMessage" aria-live="polite">${renderFormMessage()}</div>
+        ${renderDraftRecoveryGate()}
+    `;
+    bindDraftRecoveryEvents();
+}
+
 function bindFormEvents(section) {
     const form = document.getElementById('publicSurveyForm');
 
@@ -1124,10 +1723,10 @@ function bindFormEvents(section) {
         input.addEventListener('change', () => {
             const questionCode = input.dataset.questionCode || input.name;
             answers[input.name] = input.value;
-            clearQuestionState(questionCode);
-            if (shouldRefreshForVisibility(input.name) && pruneInvisibleAnswers()) {
-                clearQuestionState(input.name);
+            if (shouldRefreshForVisibility(input.name)) {
+                pruneInvisibleAnswers();
             }
+            syncQuestionValidationState(questionCode);
             scheduleDraftSave();
             renderForm({preserveQuestionCode: questionCode});
         });
@@ -1138,10 +1737,10 @@ function bindFormEvents(section) {
             const questionCode = input.dataset.questionCode || input.name;
             const selected = Array.from(form.querySelectorAll(`input[name="${input.name}"]:checked`)).map((element) => element.value);
             answers[input.name] = selected;
-            clearQuestionState(questionCode);
-            if (shouldRefreshForVisibility(input.name) && pruneInvisibleAnswers()) {
-                clearQuestionState(input.name);
+            if (shouldRefreshForVisibility(input.name)) {
+                pruneInvisibleAnswers();
             }
+            syncQuestionValidationState(questionCode);
             scheduleDraftSave();
             renderForm({preserveQuestionCode: questionCode});
         });
@@ -1150,17 +1749,18 @@ function bindFormEvents(section) {
     form.querySelectorAll('input[type="text"], textarea').forEach((input) => {
         input.addEventListener('input', () => {
             answers[input.name] = input.value;
-            clearQuestionState(input.name);
             if (shouldRefreshForVisibility(input.name)) {
                 pruneInvisibleAnswers();
             }
+            syncQuestionValidationState(input.name);
             scheduleDraftSave();
         });
 
         input.addEventListener('blur', () => {
-            if (shouldRefreshForVisibility(input.name) && pruneInvisibleAnswers()) {
-                clearQuestionState(input.name);
+            if (shouldRefreshForVisibility(input.name)) {
+                pruneInvisibleAnswers();
             }
+            syncQuestionValidationState(input.name);
             renderForm({preserveQuestionCode: input.name});
         });
     });
@@ -1168,10 +1768,10 @@ function bindFormEvents(section) {
     form.querySelectorAll('select.public-select').forEach((input) => {
         input.addEventListener('change', () => {
             answers[input.name] = input.value;
-            clearQuestionState(input.name);
-            if (shouldRefreshForVisibility(input.name) && pruneInvisibleAnswers()) {
-                clearQuestionState(input.name);
+            if (shouldRefreshForVisibility(input.name)) {
+                pruneInvisibleAnswers();
             }
+            syncQuestionValidationState(input.name);
             scheduleDraftSave();
             renderForm({preserveQuestionCode: input.name});
         });
@@ -1185,7 +1785,7 @@ function bindFormEvents(section) {
             answers[questionCode] = answers[questionCode] || {};
             answers[questionCode][rowCode] = answers[questionCode][rowCode] || {};
             answers[questionCode][rowCode][dimensionCode] = input.value;
-            clearQuestionState(questionCode);
+            syncQuestionValidationState(questionCode);
             scheduleDraftSave();
             renderForm({preserveQuestionCode: questionCode});
         });
@@ -1230,16 +1830,11 @@ function bindFormEvents(section) {
             return;
         }
 
-        answers = {};
-        invalidQuestions = new Set();
-        questionErrors = {};
-        currentStep = 0;
-        startedAt = new Date().toISOString();
-        draftWasRestored = false;
-        formMessage = defaultFormMessage();
-        clearDraft();
-        renderForm({alignActiveStep: true});
-        window.scrollTo({top: 0, behavior: 'smooth'});
+        startFreshSurveyResponse({
+            type: 'info',
+            title: 'Nueva encuesta iniciada',
+            message: 'Se borró el avance anterior y el formulario quedó listo para una respuesta nueva en este dispositivo.',
+        });
     });
 
     form.addEventListener('submit', async (event) => {
@@ -1266,9 +1861,42 @@ function bindFormEvents(section) {
             if (!response.ok || !result.success) {
                 isSubmitting = false;
                 if (result.errors) {
+                    const mismatch = detectSurveyStructureMismatch(result.errors);
+                    if (mismatch.hasMismatch) {
+                        answers = sanitizeAnswersSnapshot(answers).answers;
+                        persistDraftNow();
+                        isSubmitting = false;
+                        formMessage = {
+                            type: 'warning',
+                            title: 'La encuesta fue actualizada',
+                            message: 'Se detectaron cambios en las preguntas u opciones del servidor. La página se recargará para mostrar la versión vigente y conservar su avance válido.',
+                            details: [
+                                ...mismatch.locallyAnsweredCodes.map((code) => questionTitle(code)),
+                                ...mismatch.unknownCodes,
+                            ],
+                        };
+                        renderForm();
+                        window.setTimeout(() => window.location.reload(), 600);
+                        return;
+                    }
+
                     invalidQuestions = new Set(Object.keys(result.errors));
                     questionErrors = Object.fromEntries(
-                        Object.entries(result.errors).map(([code, message]) => [code, message || 'Esta pregunta es obligatoria.'])
+                        Object.entries(result.errors).map(([code, message]) => {
+                            const question = questionLookup[code];
+                            if (question?.is_required) {
+                                const validation = validateRequiredQuestion(question);
+                                if (!validation.valid) {
+                                    return [code, validation.error];
+                                }
+                            }
+
+                            return [code, {
+                                message: message || 'Esta pregunta es obligatoria.',
+                                details: [],
+                                meta: {},
+                            }];
+                        })
                     );
                     formMessage = {
                         type: 'danger',
@@ -1279,7 +1907,7 @@ function bindFormEvents(section) {
                     renderForm();
                     const firstError = Object.keys(result.errors)[0];
                     requestAnimationFrame(() => {
-                        getQuestionCard(firstError)?.scrollIntoView({behavior: 'smooth', block: 'center'});
+                        scrollToQuestionValidationTarget(firstError);
                     });
                     return;
                 }
@@ -1291,6 +1919,10 @@ function bindFormEvents(section) {
 
             window.clearTimeout(draftSaveTimer);
             clearDraft();
+            rotateActiveDraftId();
+            rotateSurveySessionToken();
+            pendingDraftRecovery = null;
+            draftWasRestored = false;
             surveyApp.innerHTML = `
                 <div class="hero-card">
                     <span class="chip chip-success">Respuesta registrada</span>
@@ -1322,7 +1954,7 @@ window.addEventListener('beforeunload', (event) => {
     }
 });
 trackSurveyAccess();
-renderForm({alignActiveStep: true});
+renderSurveyExperience({alignActiveStep: true});
 </script>
 <?php endif; ?>
 </body>
