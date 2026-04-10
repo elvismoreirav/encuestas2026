@@ -684,6 +684,15 @@ class SurveyService
 
         $questionMeta = [];
         foreach ($analyticsQuestions as $question) {
+            $optionLabels = [];
+            foreach ((array) ($question['options'] ?? []) as $option) {
+                $optionCode = trim((string) ($option['code'] ?? ''));
+                if ($optionCode === '') {
+                    continue;
+                }
+                $optionLabels[$optionCode] = trim((string) ($option['label'] ?? $optionCode));
+            }
+
             $questionMeta[$question['code']] = [
                 'id' => (int) $question['id'],
                 'code' => $question['code'],
@@ -693,6 +702,7 @@ class SurveyService
                 'section_title' => $sectionTitles[(int) $question['section_id']] ?? 'Sin sección',
                 'settings' => $question['settings'] ?? [],
                 'options' => $question['options'] ?? [],
+                'option_labels' => $optionLabels,
             ];
         }
 
@@ -787,25 +797,24 @@ class SurveyService
 
             $optionRows = $this->db->fetchAll(
                 "SELECT
-                    ra.question_id,
                     ra.question_code,
                     ra.question_prompt,
                     rao.option_code,
-                    rao.option_label,
+                    MIN(rao.option_label) AS option_label,
                     COUNT(*) AS total
                  FROM response_answer_options rao
                  INNER JOIN response_answers ra ON ra.id = rao.response_answer_id
                  WHERE ra.response_id IN ($placeholder)
-                 GROUP BY ra.question_id, ra.question_code, ra.question_prompt, rao.option_code, rao.option_label
-                 ORDER BY ra.question_id, total DESC",
+                 GROUP BY ra.question_code, ra.question_prompt, rao.option_code
+                 ORDER BY ra.question_code ASC, total DESC",
                 $responseIds
             );
 
             $answerCountRows = $this->db->fetchAll(
-                "SELECT question_id, question_code, COUNT(*) AS total
+                "SELECT question_code, COUNT(*) AS total
                  FROM response_answers
                  WHERE response_id IN ($placeholder)
-                 GROUP BY question_id, question_code",
+                 GROUP BY question_code",
                 $responseIds
             );
 
@@ -849,17 +858,45 @@ class SurveyService
                     'section_title' => $meta['section_title'],
                     'responses' => $answerCountMap[$code] ?? 0,
                     'coverage_percentage' => $totalResponses > 0 ? round((($answerCountMap[$code] ?? 0) / $totalResponses) * 100, 1) : 0.0,
-                    'options' => [],
+                    'options_map' => [],
                 ];
                 $count = (int) $row['total'];
                 $responsesCount = max(1, $questionStats[$code]['responses']);
-                $questionStats[$code]['options'][] = [
-                    'code' => $row['option_code'],
-                    'label' => $row['option_label'],
-                    'count' => $count,
-                    'percentage' => round(($count / $responsesCount) * 100, 1),
+                $resolvedLabel = $this->resolveAnalyticsOptionLabel(
+                    $meta,
+                    (string) ($row['option_code'] ?? ''),
+                    (string) ($row['option_label'] ?? '')
+                );
+                $bucketKey = $this->analyticsOptionBucketKey($resolvedLabel, (string) ($row['option_code'] ?? ''));
+                $questionStats[$code]['options_map'][$bucketKey] ??= [
+                    'code' => (string) ($row['option_code'] ?? ''),
+                    'label' => $resolvedLabel,
+                    'count' => 0,
+                    'percentage' => 0.0,
                 ];
+                $questionStats[$code]['options_map'][$bucketKey]['count'] += $count;
             }
+
+            foreach ($questionStats as $code => &$questionStat) {
+                if (($questionStat['type'] ?? '') !== 'choice') {
+                    continue;
+                }
+
+                $options = array_values($questionStat['options_map'] ?? []);
+                foreach ($options as &$option) {
+                    $option['percentage'] = round(($option['count'] / max(1, $questionStat['responses'])) * 100, 1);
+                }
+                unset($option);
+
+                usort($options, static function (array $left, array $right): int {
+                    return ((int) ($right['count'] ?? 0) <=> (int) ($left['count'] ?? 0))
+                        ?: strcmp((string) ($left['label'] ?? ''), (string) ($right['label'] ?? ''));
+                });
+
+                $questionStat['options'] = $options;
+                unset($questionStat['options_map']);
+            }
+            unset($questionStat);
 
             $textByQuestion = [];
             foreach ($textRows as $row) {
@@ -1121,8 +1158,8 @@ class SurveyService
     private function fetchAnalyticsLocationOptions(array $question, array $where, array $params): array
     {
         $type = (string) ($question['question_type'] ?? '');
-        $questionId = (int) ($question['id'] ?? 0);
-        if ($questionId <= 0) {
+        $questionCode = trim((string) ($question['code'] ?? ''));
+        if ($questionCode === '') {
             return [];
         }
 
@@ -1130,16 +1167,16 @@ class SurveyService
             $rows = $this->db->fetchAll(
                 "SELECT
                     rao.option_code AS value,
-                    rao.option_label AS label,
+                    MIN(rao.option_label) AS label,
                     COUNT(DISTINCT ra.response_id) AS total,
                     MIN(sr.submitted_at) AS first_submitted_at,
                     MAX(sr.submitted_at) AS last_submitted_at
                  FROM survey_responses sr
-                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_id = :location_question_id
+                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_code = :location_question_code
                  INNER JOIN response_answer_options rao ON rao.response_answer_id = ra.id
                  WHERE " . implode(' AND ', $where) . '
-                 GROUP BY rao.option_code, rao.option_label',
-                [':location_question_id' => $questionId] + $params
+                 GROUP BY rao.option_code',
+                [':location_question_code' => $questionCode] + $params
             );
 
             $countsByValue = [];
@@ -1151,7 +1188,7 @@ class SurveyService
 
                 $countsByValue[$value] = [
                     'value' => $value,
-                    'label' => (string) ($row['label'] ?? $value),
+                    'label' => $this->resolveAnalyticsOptionLabel($question, $value, (string) ($row['label'] ?? $value)),
                     'count' => (int) ($row['total'] ?? 0),
                     'first_submission_at' => $row['first_submitted_at'] ?? null,
                     'last_submission_at' => $row['last_submitted_at'] ?? null,
@@ -1191,11 +1228,11 @@ class SurveyService
                     MIN(sr.submitted_at) AS first_submitted_at,
                     MAX(sr.submitted_at) AS last_submitted_at
                  FROM survey_responses sr
-                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_id = :location_question_id
+                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_code = :location_question_code
                  WHERE " . implode(' AND ', $where) . " AND TRIM(COALESCE(ra.answer_text, '')) <> ''
                  GROUP BY TRIM(ra.answer_text)
                  ORDER BY TRIM(ra.answer_text) ASC",
-                [':location_question_id' => $questionId] + $params
+                [':location_question_code' => $questionCode] + $params
             );
 
             return array_map(static fn(array $row): array => [
@@ -1232,13 +1269,13 @@ class SurveyService
 
     private function appendAnalyticsLocationConstraint(array &$where, array &$params, array $question, string $selectedValue): void
     {
-        $questionId = (int) ($question['id'] ?? 0);
-        if ($questionId <= 0 || $selectedValue === '') {
+        $questionCode = trim((string) ($question['code'] ?? ''));
+        if ($questionCode === '' || $selectedValue === '') {
             return;
         }
 
         $type = (string) ($question['question_type'] ?? '');
-        $params[':location_filter_question_id'] = $questionId;
+        $params[':location_filter_question_code'] = $questionCode;
         $params[':location_filter_value'] = $selectedValue;
 
         if (in_array($type, ['single_choice', 'multiple_choice', 'rating'], true)) {
@@ -1247,7 +1284,7 @@ class SurveyService
                 FROM response_answers ra_filter
                 INNER JOIN response_answer_options rao_filter ON rao_filter.response_answer_id = ra_filter.id
                 WHERE ra_filter.response_id = sr.id
-                  AND ra_filter.question_id = :location_filter_question_id
+                  AND ra_filter.question_code = :location_filter_question_code
                   AND rao_filter.option_code = :location_filter_value
             )';
             return;
@@ -1258,7 +1295,7 @@ class SurveyService
                 SELECT 1
                 FROM response_answers ra_filter
                 WHERE ra_filter.response_id = sr.id
-                  AND ra_filter.question_id = :location_filter_question_id
+                  AND ra_filter.question_code = :location_filter_question_code
                   AND TRIM(COALESCE(ra_filter.answer_text, '')) = :location_filter_value
             )";
         }
@@ -1420,6 +1457,55 @@ class SurveyService
             'matrix' => 'Matriz',
             default => ucfirst(str_replace('_', ' ', trim($type))),
         };
+    }
+
+    private function resolveAnalyticsOptionLabel(array $questionMeta, string $optionCode, string $fallbackLabel = ''): string
+    {
+        $normalizedCode = trim($optionCode);
+        if ($normalizedCode !== '') {
+            $optionLabels = is_array($questionMeta['option_labels'] ?? null) ? $questionMeta['option_labels'] : [];
+            if (isset($optionLabels[$normalizedCode])) {
+                return trim((string) $optionLabels[$normalizedCode]);
+            }
+
+            foreach ((array) ($questionMeta['options'] ?? []) as $option) {
+                if (trim((string) ($option['code'] ?? '')) === $normalizedCode) {
+                    return trim((string) ($option['label'] ?? $normalizedCode));
+                }
+            }
+        }
+
+        return trim($fallbackLabel) !== '' ? trim($fallbackLabel) : $normalizedCode;
+    }
+
+    private function analyticsOptionBucketKey(string $label, string $optionCode): string
+    {
+        $normalizedLabel = $this->normalizeAnalyticsOptionBucketLabel($label);
+        if ($normalizedLabel !== '') {
+            return 'label:' . $normalizedLabel;
+        }
+
+        $normalizedCode = trim($optionCode);
+        return $normalizedCode !== '' ? 'code:' . $normalizedCode : 'label:sin-etiqueta';
+    }
+
+    private function normalizeAnalyticsOptionBucketLabel(string $label): string
+    {
+        $normalized = trim($label);
+        if ($normalized === '') {
+            return '';
+        }
+
+        $normalized = preg_replace('/^[A-ZÁÉÍÓÚÑ]\.\s*/u', '', $normalized) ?: $normalized;
+        $normalized = preg_replace('/\s+/', ' ', $normalized) ?: $normalized;
+        $normalized = mb_strtolower($normalized, 'UTF-8');
+        $normalized = strtr($normalized, [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u',
+            'ä' => 'a', 'ë' => 'e', 'ï' => 'i', 'ö' => 'o', 'ü' => 'u',
+            'ñ' => 'n',
+        ]);
+
+        return trim($normalized);
     }
 
     private function summarizeAnalyticsOptionRows(array $options): string
