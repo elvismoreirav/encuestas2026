@@ -57,7 +57,7 @@ require TEMPLATES_PATH . '/admin_header.php';
     <div class="report-toolbar">
         <div class="actions-inline">
             <button class="btn btn-primary" type="button" id="loadStatsButton">Actualizar reporte</button>
-            <button class="btn btn-secondary" type="button" id="exportStatsButton">Descargar resumen</button>
+            <button class="btn btn-secondary" type="button" id="exportStatsButton">Descargar XLSX</button>
             <button class="btn btn-secondary" type="button" id="printReportButton">Imprimir</button>
         </div>
         <div class="segmented-actions" id="reportScopeButtons">
@@ -125,6 +125,39 @@ require TEMPLATES_PATH . '/admin_header.php';
         </div>
     </div>
     <div id="statsHighlights" class="insights-grid"></div>
+</section>
+
+<section class="panel">
+    <div class="panel-header">
+        <div>
+            <h2>Matriz dinámica de conteo</h2>
+            <p>Vista tabular para seguir el avance por territorio y por pregunta usando el mismo filtro del reporte.</p>
+        </div>
+    </div>
+    <div class="report-matrix-layout">
+        <article class="chart-card report-chart-card report-table-card">
+            <div class="report-chart-head">
+                <span class="chip chip-muted">Territorio</span>
+                <strong>Conteo territorial</strong>
+                <p id="territorialCountDescription">Comparativo por ciudad o cantón dentro del rango actual.</p>
+            </div>
+            <div class="table-shell">
+                <div id="territorialCountTable"></div>
+                <div id="territorialCountFallback" class="table-wrap" style="display:none;"></div>
+            </div>
+        </article>
+        <article class="chart-card report-chart-card report-table-card">
+            <div class="report-chart-head">
+                <span class="chip chip-muted">Formulario</span>
+                <strong>Conteo por pregunta</strong>
+                <p id="questionCountDescription">Lectura operativa del instrumento según el cantón seleccionado o la vista total.</p>
+            </div>
+            <div class="table-shell">
+                <div id="questionCountTable"></div>
+                <div id="questionCountFallback" class="table-wrap" style="display:none;"></div>
+            </div>
+        </article>
+    </div>
 </section>
 
 <section class="panel">
@@ -221,6 +254,8 @@ let trendChart;
 let coverageChart;
 let sectionChart;
 let dynamicCharts = [];
+let territorialCountTable;
+let questionCountTable;
 let lastStatsPayload = null;
 let questionDetailChart = null;
 let currentQuestionSort = 'order';
@@ -376,10 +411,533 @@ function destroyCharts() {
     sectionChart?.destroy();
     dynamicCharts.forEach((chart) => chart.destroy());
     dynamicCharts = [];
+    destroyCountTables();
 }
 
 function buildEmptyState(message) {
     return `<div class="empty-state">${escapeHtml(message)}</div>`;
+}
+
+function formatCount(value) {
+    return Number(value || 0).toLocaleString('es-EC');
+}
+
+function questionTypeLabel(type = '') {
+    const normalized = String(type || '').trim();
+    if (normalized === 'single_choice') {
+        return 'Selección única';
+    }
+    if (normalized === 'multiple_choice') {
+        return 'Selección múltiple';
+    }
+    if (normalized === 'rating') {
+        return 'Escala';
+    }
+    if (normalized === 'text' || normalized === 'textarea') {
+        return 'Texto abierto';
+    }
+    if (normalized === 'matrix') {
+        return 'Matriz';
+    }
+    return normalized ? normalized.replace(/_/g, ' ') : 'Sin tipo';
+}
+
+function buildFallbackCountMatrix(data) {
+    const locationFilter = data.location_filter || {};
+    const locationOptions = Array.isArray(locationFilter.options) ? locationFilter.options : [];
+    const totalResponses = Number(locationOptions[0]?.count || data.summary?.responses || 0);
+    const selectedValue = String(locationFilter.selected_value || 'all');
+    const territorialRows = locationOptions
+        .filter((option) => String(option.value ?? 'all') !== 'all')
+        .map((option) => {
+            const count = Number(option.count || 0);
+            const value = String(option.value ?? '');
+            return {
+                value,
+                label: String(option.label || value),
+                count,
+                percentage: totalResponses > 0 ? Number(((count * 100) / totalResponses).toFixed(1)) : 0,
+                first_submission_at: option.first_submission_at || null,
+                last_submission_at: option.last_submission_at || null,
+                is_selected: selectedValue !== 'all' && value === selectedValue,
+                has_activity: count > 0,
+            };
+        });
+
+    const questionStats = data.question_stats || {};
+    const coverageRows = Array.isArray(data.coverage) ? data.coverage : [];
+    const questionRows = coverageRows.map((item, index) => {
+        const stat = questionStats[item.code] || null;
+        let summary = 'Sin respuestas dentro del filtro actual.';
+        let highlightLabel = null;
+        let highlightCount = null;
+        let highlightPercentage = null;
+        let optionBreakdown = [];
+        let otherOptions = [];
+        let otherOptionsSummary = 'Sin lectura adicional.';
+
+        if (stat?.type === 'choice' && Array.isArray(stat.options) && stat.options.length) {
+            optionBreakdown = stat.options.map((option) => ({
+                label: String(option.label || ''),
+                count: Number(option.count || 0),
+                percentage: Number(option.percentage || 0),
+            })).filter((option) => option.label);
+            otherOptions = optionBreakdown.slice(1);
+            otherOptionsSummary = otherOptions.length
+                ? otherOptions.map((option) => `${option.label} · ${formatPercentage(option.percentage)} (${formatCount(option.count)})`).join(' | ')
+                : 'Sin otras respuestas relevantes.';
+            const topOption = stat.options[0];
+            highlightLabel = topOption.label || null;
+            highlightCount = Number(topOption.count || 0);
+            highlightPercentage = Number(topOption.percentage || 0);
+            summary = `${highlightLabel || 'Opción principal'} lidera con ${formatPercentage(highlightPercentage)} (${highlightCount}).`;
+        } else if (stat?.type === 'matrix') {
+            const rowCount = Array.isArray(stat.matrix_meta?.rows) ? stat.matrix_meta.rows.length : 0;
+            const dimensionCount = Array.isArray(stat.matrix_meta?.dimensions) ? stat.matrix_meta.dimensions.length : 0;
+            summary = Number(item.responses || 0) > 0
+                ? `${rowCount} fila(s) y ${dimensionCount} dimensión(es) con actividad.`
+                : summary;
+        } else if (stat?.type === 'text') {
+            const keywordCount = Array.isArray(stat.keywords) ? stat.keywords.length : 0;
+            const sampleCount = Array.isArray(stat.samples) ? stat.samples.length : 0;
+            summary = Number(item.responses || 0) > 0
+                ? (keywordCount > 0
+                    ? `${keywordCount} palabra(s) clave y ${sampleCount} muestra(s) destacadas.`
+                    : `${Number(item.responses || 0)} respuesta(s) abiertas registradas.`)
+                : summary;
+            if (keywordCount > 0) {
+                highlightLabel = stat.keywords[0]?.word || null;
+                highlightCount = Number(stat.keywords[0]?.count || 0);
+            }
+        }
+
+        return {
+            position: index + 1,
+            code: String(item.code || ''),
+            title: String(item.title || ''),
+            section_title: String(item.section_title || 'Sin sección'),
+            type: String(item.type || ''),
+            type_label: questionTypeLabel(item.type || ''),
+            responses: Number(item.responses || 0),
+            coverage_percentage: Number(item.coverage_percentage || 0),
+            summary,
+            highlight_label: highlightLabel,
+            highlight_count: highlightCount,
+            highlight_percentage: highlightPercentage,
+            option_breakdown: optionBreakdown,
+            other_options: otherOptions,
+            other_options_summary: otherOptionsSummary,
+            has_activity: Number(item.responses || 0) > 0,
+        };
+    });
+
+    return {
+        territorial: {
+            enabled: !!locationFilter.enabled,
+            selected_value: selectedValue,
+            selected_label: String(locationFilter.selected_label || 'Todos'),
+            selection_mode: selectedValue === 'all' ? 'all' : 'single',
+            total_responses: totalResponses,
+            filtered_responses: Number(data.summary?.responses || 0),
+            rows: selectedValue === 'all' ? territorialRows : territorialRows.filter((row) => row.is_selected),
+            all_rows: territorialRows,
+        },
+        questions: {
+            filtered_responses: Number(data.summary?.responses || 0),
+            total_questions: questionRows.length,
+            answered_questions: questionRows.filter((row) => row.responses > 0).length,
+            rows: questionRows,
+        },
+    };
+}
+
+function getCountMatrix(data) {
+    return data?.count_matrix || buildFallbackCountMatrix(data || {});
+}
+
+function destroyCountTables() {
+    territorialCountTable?.destroy();
+    questionCountTable?.destroy();
+    territorialCountTable = null;
+    questionCountTable = null;
+
+    const territorialContainer = document.getElementById('territorialCountTable');
+    const questionContainer = document.getElementById('questionCountTable');
+    const territorialFallback = document.getElementById('territorialCountFallback');
+    const questionFallback = document.getElementById('questionCountFallback');
+
+    if (territorialContainer) {
+        territorialContainer.innerHTML = '';
+    }
+
+    if (questionContainer) {
+        questionContainer.innerHTML = '';
+    }
+
+    if (territorialFallback) {
+        territorialFallback.innerHTML = '';
+        territorialFallback.style.display = 'none';
+    }
+
+    if (questionFallback) {
+        questionFallback.innerHTML = '';
+        questionFallback.style.display = 'none';
+    }
+}
+
+function territoryStatusLabel(row) {
+    if (row?.is_selected) {
+        return 'En foco';
+    }
+
+    return Number(row?.count || 0) > 0 ? 'Con actividad' : 'Sin actividad';
+}
+
+function territoryStatusClass(row) {
+    if (row?.is_selected) {
+        return 'count-status-active';
+    }
+
+    return Number(row?.count || 0) > 0 ? 'count-status-neutral' : 'count-status-muted';
+}
+
+function buildQuestionHighlight(row) {
+    if (row?.highlight_label && row?.highlight_percentage !== null && row?.highlight_percentage !== undefined) {
+        return `${row.highlight_label} · ${formatPercentage(row.highlight_percentage)} (${formatCount(row.highlight_count)})`;
+    }
+
+    if (row?.highlight_label && row?.highlight_count !== null && row?.highlight_count !== undefined) {
+        return `${row.highlight_label} · ${formatCount(row.highlight_count)}`;
+    }
+
+    return row?.summary || 'Sin lectura rápida.';
+}
+
+function getQuestionOtherOptions(row) {
+    if (Array.isArray(row?.other_options) && row.other_options.length) {
+        return row.other_options;
+    }
+
+    if (Array.isArray(row?.option_breakdown) && row.option_breakdown.length > 1) {
+        return row.option_breakdown.slice(1);
+    }
+
+    return [];
+}
+
+function buildQuestionOtherAnswersSummary(row) {
+    if (row?.other_options_summary) {
+        return row.other_options_summary;
+    }
+
+    const options = getQuestionOtherOptions(row);
+    if (!options.length) {
+        return row?.option_breakdown?.length ? 'Sin otras respuestas relevantes.' : 'No aplica';
+    }
+
+    return options.map((option) => `${option.label} · ${formatPercentage(option.percentage)} (${formatCount(option.count)})`).join(' | ');
+}
+
+function renderQuestionOtherAnswersHtml(row) {
+    const options = getQuestionOtherOptions(row);
+    if (!options.length) {
+        return `<span class="report-table-muted">${escapeHtml(buildQuestionOtherAnswersSummary(row))}</span>`;
+    }
+
+    return `
+        <div class="report-breakdown-list">
+            ${options.map((option) => `
+                <span class="report-breakdown-pill">
+                    <strong>${escapeHtml(option.label || '')}</strong>
+                    <span>${escapeHtml(formatPercentage(option.percentage))} (${escapeHtml(formatCount(option.count))})</span>
+                </span>
+            `).join('')}
+        </div>
+    `;
+}
+
+function renderTerritorialCountFallback(matrix) {
+    const fallback = document.getElementById('territorialCountFallback');
+    if (!fallback) {
+        return;
+    }
+
+    if (!matrix?.enabled) {
+        fallback.style.display = 'block';
+        fallback.innerHTML = buildEmptyState('La encuesta actual no dispone de un filtro territorial compatible para construir esta tabla.');
+        return;
+    }
+
+    const rows = Array.isArray(matrix.rows) ? matrix.rows : [];
+    if (!rows.length) {
+        fallback.style.display = 'block';
+        fallback.innerHTML = buildEmptyState('No hay respuestas territoriales para el filtro actual.');
+        return;
+    }
+
+    fallback.style.display = 'block';
+    fallback.innerHTML = `
+        <table>
+            <thead>
+                <tr>
+                    <th>Cantón / ciudad</th>
+                    <th>Conteo</th>
+                    <th>% rango</th>
+                    <th>Primera captura</th>
+                    <th>Última captura</th>
+                    <th>Estado</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rows.map((row) => `
+                    <tr>
+                        <td>${escapeHtml(row.label || '')}</td>
+                        <td>${formatCount(row.count)}</td>
+                        <td>${formatPercentage(row.percentage)}</td>
+                        <td>${escapeHtml(formatDateTime(row.first_submission_at))}</td>
+                        <td>${escapeHtml(formatDateTime(row.last_submission_at))}</td>
+                        <td><span class="count-status ${territoryStatusClass(row)}">${escapeHtml(territoryStatusLabel(row))}</span></td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+function renderQuestionCountFallback(matrix) {
+    const fallback = document.getElementById('questionCountFallback');
+    if (!fallback) {
+        return;
+    }
+
+    const rows = Array.isArray(matrix?.rows) ? matrix.rows : [];
+    if (!rows.length) {
+        fallback.style.display = 'block';
+        fallback.innerHTML = buildEmptyState('No hay preguntas disponibles para construir el conteo operativo.');
+        return;
+    }
+
+    fallback.style.display = 'block';
+    fallback.innerHTML = `
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Pregunta</th>
+                    <th>Sección</th>
+                    <th>Tipo</th>
+                    <th>Resp.</th>
+                    <th>Cobertura</th>
+                    <th>Lectura rápida</th>
+                    <th>Otras respuestas</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rows.map((row) => `
+                    <tr>
+                        <td>${formatCount(row.position)}</td>
+                        <td>
+                            <div class="report-table-title">
+                                <strong>${escapeHtml(row.code)}. ${escapeHtml(row.title)}</strong>
+                            </div>
+                        </td>
+                        <td>${escapeHtml(row.section_title)}</td>
+                        <td>${escapeHtml(row.type_label)}</td>
+                        <td>${formatCount(row.responses)}</td>
+                        <td>${formatPercentage(row.coverage_percentage)}</td>
+                        <td>${escapeHtml(buildQuestionHighlight(row))}</td>
+                        <td>${renderQuestionOtherAnswersHtml(row)}</td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+function renderTerritorialCountTable(matrix) {
+    const description = document.getElementById('territorialCountDescription');
+    const container = document.getElementById('territorialCountTable');
+
+    if (description) {
+        description.textContent = matrix?.enabled
+            ? (matrix.selection_mode === 'all'
+                ? 'Comparativo por ciudad o cantón dentro del rango actual.'
+                : `Conteo operativo concentrado en ${matrix.selected_label}.`)
+            : 'La encuesta actual no dispone de un filtro territorial compatible.';
+    }
+
+    if (!window.Tabulator) {
+        renderTerritorialCountFallback(matrix);
+        return;
+    }
+
+    if (!matrix?.enabled) {
+        renderTerritorialCountFallback(matrix);
+        return;
+    }
+
+    const rows = Array.isArray(matrix.rows) ? matrix.rows : [];
+    if (!rows.length) {
+        renderTerritorialCountFallback(matrix);
+        return;
+    }
+
+    territorialCountTable = new Tabulator(container, {
+        data: rows,
+        layout: 'fitColumns',
+        responsiveLayout: 'collapse',
+        placeholder: 'No hay respuestas territoriales para el filtro actual.',
+        initialSort: [{column: 'count', dir: 'desc'}],
+        columns: [
+            {
+                title: 'Cantón / ciudad',
+                field: 'label',
+                minWidth: 210,
+                formatter: (cell) => {
+                    const row = cell.getRow().getData();
+                    return `
+                        <div class="report-table-title">
+                            <strong>${escapeHtml(cell.getValue())}</strong>
+                            <small>${escapeHtml(territoryStatusLabel(row))}</small>
+                        </div>
+                    `;
+                },
+            },
+            {
+                title: 'Conteo',
+                field: 'count',
+                hozAlign: 'center',
+                sorter: 'number',
+                formatter: (cell) => `<strong>${formatCount(cell.getValue())}</strong>`,
+            },
+            {
+                title: '% rango',
+                field: 'percentage',
+                hozAlign: 'center',
+                sorter: 'number',
+                formatter: (cell) => formatPercentage(cell.getValue()),
+            },
+            {
+                title: 'Primera captura',
+                field: 'first_submission_at',
+                minWidth: 180,
+                formatter: (cell) => formatDateTime(cell.getValue()),
+            },
+            {
+                title: 'Última captura',
+                field: 'last_submission_at',
+                minWidth: 180,
+                formatter: (cell) => formatDateTime(cell.getValue()),
+            },
+            {
+                title: 'Estado',
+                field: 'is_selected',
+                hozAlign: 'center',
+                formatter: (cell) => {
+                    const row = cell.getRow().getData();
+                    return `<span class="count-status ${territoryStatusClass(row)}">${escapeHtml(territoryStatusLabel(row))}</span>`;
+                },
+            },
+        ],
+    });
+}
+
+function renderQuestionCountTable(matrix) {
+    const description = document.getElementById('questionCountDescription');
+    const container = document.getElementById('questionCountTable');
+
+    if (description) {
+        description.textContent = matrix?.filtered_responses > 0
+            ? `${formatCount(matrix.answered_questions)} de ${formatCount(matrix.total_questions)} preguntas tienen respuestas en el filtro actual.`
+            : 'Todavía no existen respuestas suficientes para construir el conteo operativo.';
+    }
+
+    if (!window.Tabulator) {
+        renderQuestionCountFallback(matrix);
+        return;
+    }
+
+    const rows = Array.isArray(matrix?.rows) ? matrix.rows : [];
+    if (!rows.length) {
+        renderQuestionCountFallback(matrix);
+        return;
+    }
+
+    questionCountTable = new Tabulator(container, {
+        data: rows,
+        layout: 'fitColumns',
+        responsiveLayout: 'collapse',
+        placeholder: 'No hay preguntas disponibles para construir el conteo operativo.',
+        initialSort: [{column: 'position', dir: 'asc'}],
+        columns: [
+            {
+                title: '#',
+                field: 'position',
+                width: 72,
+                hozAlign: 'center',
+                sorter: 'number',
+            },
+            {
+                title: 'Pregunta',
+                field: 'title',
+                minWidth: 280,
+                formatter: (cell) => {
+                    const row = cell.getRow().getData();
+                    return `
+                        <div class="report-table-title">
+                            <strong>${escapeHtml(row.code)}. ${escapeHtml(cell.getValue())}</strong>
+                            <small>${escapeHtml(row.summary || '')}</small>
+                        </div>
+                    `;
+                },
+            },
+            {
+                title: 'Sección',
+                field: 'section_title',
+                minWidth: 180,
+            },
+            {
+                title: 'Tipo',
+                field: 'type_label',
+                minWidth: 150,
+            },
+            {
+                title: 'Resp.',
+                field: 'responses',
+                width: 96,
+                hozAlign: 'center',
+                sorter: 'number',
+                formatter: (cell) => `<strong>${formatCount(cell.getValue())}</strong>`,
+            },
+            {
+                title: 'Cobertura',
+                field: 'coverage_percentage',
+                minWidth: 110,
+                hozAlign: 'center',
+                sorter: 'number',
+                formatter: (cell) => formatPercentage(cell.getValue()),
+            },
+            {
+                title: 'Lectura rápida',
+                field: 'summary',
+                minWidth: 260,
+                formatter: (cell) => escapeHtml(buildQuestionHighlight(cell.getRow().getData())),
+            },
+            {
+                title: 'Otras respuestas',
+                field: 'other_options_summary',
+                minWidth: 320,
+                formatter: (cell) => renderQuestionOtherAnswersHtml(cell.getRow().getData()),
+            },
+        ],
+    });
+}
+
+function renderCountTables(data) {
+    destroyCountTables();
+    const matrix = getCountMatrix(data);
+    renderTerritorialCountTable(matrix.territorial || {});
+    renderQuestionCountTable(matrix.questions || {});
 }
 
 function resetLocationFilterControl() {
@@ -1284,6 +1842,7 @@ function renderReport(data) {
     renderLocationFilterControl(data.location_filter || null);
     renderSummaryCards(data.summary, data.survey, data.location_filter || null);
     renderHighlights(data.highlights || []);
+    renderCountTables(data);
     renderLocationChart(data);
     renderTrendChart(data);
     renderCoverageChart(data);
@@ -1293,30 +1852,16 @@ function renderReport(data) {
     renderTextInsights(data);
 }
 
-function downloadStats() {
-    if (!lastStatsPayload) {
-        notify('warning', 'Reporte no disponible', 'Actualice el reporte antes de descargar el resumen.');
-        return;
-    }
-
-    const surveyName = document.getElementById('stats_survey_id').selectedOptions[0]?.textContent || 'encuesta';
-    const scopeSuffix = lastStatsPayload?.report_scope === 'special' ? '-reporte-aparte' : '-reporte-principal';
-    const blob = new Blob([JSON.stringify(lastStatsPayload, null, 2)], {type: 'application/json;charset=utf-8'});
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${slugify(surveyName)}${scopeSuffix}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(link.href);
-}
-
 function renderReportEmptyState(message) {
     destroyCharts();
     lastStatsPayload = null;
     resetLocationFilterControl();
     document.getElementById('statsSummaryCards').innerHTML = `<article class="card report-summary-card"><div class="metric-label">${escapeHtml(message)}</div></article>`;
     document.getElementById('statsHighlights').innerHTML = buildEmptyState(message);
+    document.getElementById('territorialCountFallback').style.display = 'block';
+    document.getElementById('territorialCountFallback').innerHTML = buildEmptyState(message);
+    document.getElementById('questionCountFallback').style.display = 'block';
+    document.getElementById('questionCountFallback').innerHTML = buildEmptyState(message);
     document.getElementById('questionCharts').innerHTML = buildEmptyState(message);
     document.getElementById('matrixPanel').style.display = 'none';
     document.getElementById('textPanel').style.display = 'none';
@@ -1346,6 +1891,52 @@ async function loadStats() {
     setActiveReportScope(result.data.report_scope || document.getElementById('stats_report_scope')?.value || 'primary');
     syncReportUrlState();
     renderReport(lastStatsPayload);
+}
+
+function extractFilenameFromDisposition(disposition, fallback = 'reporte-matriz.xlsx') {
+    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match?.[1]) {
+        return decodeURIComponent(utf8Match[1]);
+    }
+
+    const asciiMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
+    if (asciiMatch?.[1]) {
+        return asciiMatch[1];
+    }
+
+    return fallback;
+}
+
+async function downloadStats() {
+    if (!lastStatsPayload) {
+        notify('warning', 'Reporte no disponible', 'Actualice el reporte antes de descargar la matriz en Excel.');
+        return;
+    }
+
+    const response = await fetch(`<?= url('api/admin/app.php?action=stats_export_xlsx') ?>&${getStatsFilters()}`);
+    const contentType = response.headers.get('content-type') || '';
+
+    if (!response.ok || contentType.includes('application/json')) {
+        let result = null;
+        try {
+            result = await response.json();
+        } catch (error) {
+            // Ignore invalid JSON and use a generic message.
+        }
+
+        notify('error', 'No se pudo descargar el Excel', result?.message || 'Intente nuevamente.');
+        return;
+    }
+
+    const blob = await response.blob();
+    const disposition = response.headers.get('content-disposition') || '';
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = extractFilenameFromDisposition(disposition);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
 }
 
 function bootReportsPage() {

@@ -1173,6 +1173,88 @@ th {
     flex-wrap: wrap;
 }
 
+.report-matrix-layout {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 18px;
+    align-items: start;
+}
+
+.report-table-card .table-shell {
+    height: 100%;
+}
+
+.report-table-card table {
+    min-width: 760px;
+}
+
+.report-table-title {
+    display: grid;
+    gap: 4px;
+}
+
+.report-table-title small {
+    color: var(--text-soft);
+    line-height: 1.45;
+}
+
+.report-breakdown-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.report-breakdown-pill {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: 14px;
+    background: rgba(30, 77, 57, 0.06);
+    border: 1px solid rgba(30, 77, 57, 0.08);
+    line-height: 1.35;
+}
+
+.report-breakdown-pill strong {
+    color: var(--shalom-primary-dark);
+}
+
+.report-breakdown-pill span,
+.report-table-muted {
+    color: var(--text-soft);
+    font-size: 0.88rem;
+}
+
+.count-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 110px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.count-status-active {
+    background: rgba(30, 77, 57, 0.12);
+    color: var(--shalom-primary-dark);
+}
+
+.count-status-neutral {
+    background: rgba(49, 95, 133, 0.12);
+    color: #2b587a;
+}
+
+.count-status-muted {
+    background: rgba(120, 132, 126, 0.14);
+    color: var(--text-soft);
+}
+
 .report-stat-pill {
     display: inline-flex;
     align-items: center;
@@ -1796,6 +1878,7 @@ th {
 .survey-form {
     display: grid;
     gap: 20px;
+    padding-bottom: var(--survey-sticky-actions-space, 0px);
 }
 
 .survey-form[aria-busy="true"] {
@@ -2143,7 +2226,7 @@ th {
 .form-status-dock {
     position: fixed;
     right: 22px;
-    bottom: 22px;
+    bottom: calc(var(--survey-sticky-actions-space, 0px) + 22px);
     z-index: 60;
     width: min(440px, calc(100vw - 28px));
     pointer-events: none;
@@ -2875,10 +2958,6 @@ th {
 }
 
 @media (max-width: 768px) {
-    .survey-form {
-        padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 112px);
-    }
-
     .main-panel {
         padding: 18px;
     }
@@ -2912,7 +2991,8 @@ th {
     .report-chart-grid,
     .text-insight-grid,
     .insights-grid,
-    .matrix-report-grid {
+    .matrix-report-grid,
+    .report-matrix-layout {
         grid-template-columns: 1fr;
     }
 
@@ -3034,6 +3114,8 @@ th {
         position: sticky;
         bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
         z-index: 24;
+        padding: 14px 16px;
+        gap: 10px;
         backdrop-filter: blur(16px);
         background: rgba(255, 255, 255, 0.96);
         box-shadow: 0 -4px 24px rgba(17, 32, 25, 0.1), 0 -1px 0 rgba(30, 77, 57, 0.08);
@@ -3078,7 +3160,7 @@ th {
     .form-status-dock {
         right: 12px;
         left: 12px;
-        bottom: 12px;
+        bottom: calc(var(--survey-sticky-actions-space, 0px) + 12px);
         width: auto;
     }
 

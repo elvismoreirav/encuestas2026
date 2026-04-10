@@ -102,6 +102,17 @@ try {
             ], $authUser);
             json_response(['success' => true, 'data' => $stats]);
 
+        case 'stats_export_xlsx':
+            $requirePermission(auth()->canAccessInsights(), 'No tiene permisos para consultar reportes.');
+            $surveyId = (int) ($payload['survey_id'] ?? 0);
+            $stats = surveys()->analytics($surveyId, [
+                'from' => $payload['from'] ?? null,
+                'to' => $payload['to'] ?? null,
+                'location' => $payload['location'] ?? null,
+                'report_scope' => $payload['report_scope'] ?? null,
+            ], $authUser);
+            surveys()->downloadAnalyticsCountMatrixXlsx($stats);
+
         case 'save_user':
             $requirePermission(auth()->canManageUsers(), 'No tiene permisos para administrar usuarios.');
             $userId = users()->saveUser($payload, (int) auth()->id());

@@ -684,6 +684,15 @@ class SurveyService
 
         $questionMeta = [];
         foreach ($analyticsQuestions as $question) {
+            $optionLabels = [];
+            foreach ((array) ($question['options'] ?? []) as $option) {
+                $optionCode = trim((string) ($option['code'] ?? ''));
+                if ($optionCode === '') {
+                    continue;
+                }
+                $optionLabels[$optionCode] = trim((string) ($option['label'] ?? $optionCode));
+            }
+
             $questionMeta[$question['code']] = [
                 'id' => (int) $question['id'],
                 'code' => $question['code'],
@@ -693,6 +702,7 @@ class SurveyService
                 'section_title' => $sectionTitles[(int) $question['section_id']] ?? 'Sin sección',
                 'settings' => $question['settings'] ?? [],
                 'options' => $question['options'] ?? [],
+                'option_labels' => $optionLabels,
             ];
         }
 
@@ -787,25 +797,24 @@ class SurveyService
 
             $optionRows = $this->db->fetchAll(
                 "SELECT
-                    ra.question_id,
                     ra.question_code,
                     ra.question_prompt,
-                    MIN(rao.option_code) AS option_code,
-                    rao.option_label,
+                    rao.option_code,
+                    MIN(rao.option_label) AS option_label,
                     COUNT(*) AS total
                  FROM response_answer_options rao
                  INNER JOIN response_answers ra ON ra.id = rao.response_answer_id
                  WHERE ra.response_id IN ($placeholder)
-                 GROUP BY ra.question_id, ra.question_code, ra.question_prompt, rao.option_label
-                 ORDER BY ra.question_id, total DESC",
+                 GROUP BY ra.question_code, ra.question_prompt, rao.option_code
+                 ORDER BY ra.question_code ASC, total DESC",
                 $responseIds
             );
 
             $answerCountRows = $this->db->fetchAll(
-                "SELECT question_id, question_code, COUNT(*) AS total
+                "SELECT question_code, COUNT(*) AS total
                  FROM response_answers
                  WHERE response_id IN ($placeholder)
-                 GROUP BY question_id, question_code",
+                 GROUP BY question_code",
                 $responseIds
             );
 
@@ -849,17 +858,45 @@ class SurveyService
                     'section_title' => $meta['section_title'],
                     'responses' => $answerCountMap[$code] ?? 0,
                     'coverage_percentage' => $totalResponses > 0 ? round((($answerCountMap[$code] ?? 0) / $totalResponses) * 100, 1) : 0.0,
-                    'options' => [],
+                    'options_map' => [],
                 ];
                 $count = (int) $row['total'];
                 $responsesCount = max(1, $questionStats[$code]['responses']);
-                $questionStats[$code]['options'][] = [
-                    'code' => $row['option_code'],
-                    'label' => $row['option_label'],
-                    'count' => $count,
-                    'percentage' => round(($count / $responsesCount) * 100, 1),
+                $resolvedLabel = $this->resolveAnalyticsOptionLabel(
+                    $meta,
+                    (string) ($row['option_code'] ?? ''),
+                    (string) ($row['option_label'] ?? '')
+                );
+                $bucketKey = $this->analyticsOptionBucketKey($resolvedLabel, (string) ($row['option_code'] ?? ''));
+                $questionStats[$code]['options_map'][$bucketKey] ??= [
+                    'code' => (string) ($row['option_code'] ?? ''),
+                    'label' => $resolvedLabel,
+                    'count' => 0,
+                    'percentage' => 0.0,
                 ];
+                $questionStats[$code]['options_map'][$bucketKey]['count'] += $count;
             }
+
+            foreach ($questionStats as $code => &$questionStat) {
+                if (($questionStat['type'] ?? '') !== 'choice') {
+                    continue;
+                }
+
+                $options = array_values($questionStat['options_map'] ?? []);
+                foreach ($options as &$option) {
+                    $option['percentage'] = round(($option['count'] / max(1, $questionStat['responses'])) * 100, 1);
+                }
+                unset($option);
+
+                usort($options, static function (array $left, array $right): int {
+                    return ((int) ($right['count'] ?? 0) <=> (int) ($left['count'] ?? 0))
+                        ?: strcmp((string) ($left['label'] ?? ''), (string) ($right['label'] ?? ''));
+                });
+
+                $questionStat['options'] = $options;
+                unset($questionStat['options_map']);
+            }
+            unset($questionStat);
 
             $textByQuestion = [];
             foreach ($textRows as $row) {
@@ -1036,6 +1073,14 @@ class SurveyService
             'section_stats' => array_values($sectionStats),
             'question_stats' => $orderedQuestionStats,
             'highlights' => $highlights,
+            'count_matrix' => $this->buildAnalyticsCountMatrix(
+                $locationOptions,
+                $locationFilter,
+                $baseTotalResponses,
+                $totalResponses,
+                $coverage,
+                $orderedQuestionStats
+            ),
         ];
     }
 
@@ -1113,20 +1158,25 @@ class SurveyService
     private function fetchAnalyticsLocationOptions(array $question, array $where, array $params): array
     {
         $type = (string) ($question['question_type'] ?? '');
-        $questionId = (int) ($question['id'] ?? 0);
-        if ($questionId <= 0) {
+        $questionCode = trim((string) ($question['code'] ?? ''));
+        if ($questionCode === '') {
             return [];
         }
 
         if (in_array($type, ['single_choice', 'multiple_choice', 'rating'], true)) {
             $rows = $this->db->fetchAll(
-                "SELECT MIN(rao.option_code) AS value, rao.option_label AS label, COUNT(DISTINCT ra.response_id) AS total
+                "SELECT
+                    rao.option_code AS value,
+                    MIN(rao.option_label) AS label,
+                    COUNT(DISTINCT ra.response_id) AS total,
+                    MIN(sr.submitted_at) AS first_submitted_at,
+                    MAX(sr.submitted_at) AS last_submitted_at
                  FROM survey_responses sr
-                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_id = :location_question_id
+                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_code = :location_question_code
                  INNER JOIN response_answer_options rao ON rao.response_answer_id = ra.id
                  WHERE " . implode(' AND ', $where) . '
-                 GROUP BY rao.option_label',
-                [':location_question_id' => $questionId] + $params
+                 GROUP BY rao.option_code',
+                [':location_question_code' => $questionCode] + $params
             );
 
             $countsByValue = [];
@@ -1138,8 +1188,10 @@ class SurveyService
 
                 $countsByValue[$value] = [
                     'value' => $value,
-                    'label' => (string) ($row['label'] ?? $value),
+                    'label' => $this->resolveAnalyticsOptionLabel($question, $value, (string) ($row['label'] ?? $value)),
                     'count' => (int) ($row['total'] ?? 0),
+                    'first_submission_at' => $row['first_submitted_at'] ?? null,
+                    'last_submission_at' => $row['last_submitted_at'] ?? null,
                 ];
             }
 
@@ -1154,6 +1206,8 @@ class SurveyService
                     'value' => $value,
                     'label' => trim((string) ($option['label'] ?? $value)),
                     'count' => (int) ($countsByValue[$value]['count'] ?? 0),
+                    'first_submission_at' => $countsByValue[$value]['first_submission_at'] ?? null,
+                    'last_submission_at' => $countsByValue[$value]['last_submission_at'] ?? null,
                 ];
                 unset($countsByValue[$value]);
             }
@@ -1167,19 +1221,26 @@ class SurveyService
 
         if (in_array($type, ['text', 'textarea'], true)) {
             $rows = $this->db->fetchAll(
-                "SELECT TRIM(ra.answer_text) AS value, TRIM(ra.answer_text) AS label, COUNT(*) AS total
+                "SELECT
+                    TRIM(ra.answer_text) AS value,
+                    TRIM(ra.answer_text) AS label,
+                    COUNT(*) AS total,
+                    MIN(sr.submitted_at) AS first_submitted_at,
+                    MAX(sr.submitted_at) AS last_submitted_at
                  FROM survey_responses sr
-                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_id = :location_question_id
+                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_code = :location_question_code
                  WHERE " . implode(' AND ', $where) . " AND TRIM(COALESCE(ra.answer_text, '')) <> ''
                  GROUP BY TRIM(ra.answer_text)
                  ORDER BY TRIM(ra.answer_text) ASC",
-                [':location_question_id' => $questionId] + $params
+                [':location_question_code' => $questionCode] + $params
             );
 
             return array_map(static fn(array $row): array => [
                 'value' => (string) ($row['value'] ?? ''),
                 'label' => (string) ($row['label'] ?? ''),
                 'count' => (int) ($row['total'] ?? 0),
+                'first_submission_at' => $row['first_submitted_at'] ?? null,
+                'last_submission_at' => $row['last_submitted_at'] ?? null,
             ], array_values(array_filter($rows, static fn(array $row): bool => trim((string) ($row['value'] ?? '')) !== '')));
         }
 
@@ -1208,13 +1269,13 @@ class SurveyService
 
     private function appendAnalyticsLocationConstraint(array &$where, array &$params, array $question, string $selectedValue): void
     {
-        $questionId = (int) ($question['id'] ?? 0);
-        if ($questionId <= 0 || $selectedValue === '') {
+        $questionCode = trim((string) ($question['code'] ?? ''));
+        if ($questionCode === '' || $selectedValue === '') {
             return;
         }
 
         $type = (string) ($question['question_type'] ?? '');
-        $params[':location_filter_question_id'] = $questionId;
+        $params[':location_filter_question_code'] = $questionCode;
         $params[':location_filter_value'] = $selectedValue;
 
         if (in_array($type, ['single_choice', 'multiple_choice', 'rating'], true)) {
@@ -1223,7 +1284,7 @@ class SurveyService
                 FROM response_answers ra_filter
                 INNER JOIN response_answer_options rao_filter ON rao_filter.response_answer_id = ra_filter.id
                 WHERE ra_filter.response_id = sr.id
-                  AND ra_filter.question_id = :location_filter_question_id
+                  AND ra_filter.question_code = :location_filter_question_code
                   AND rao_filter.option_code = :location_filter_value
             )';
             return;
@@ -1234,10 +1295,350 @@ class SurveyService
                 SELECT 1
                 FROM response_answers ra_filter
                 WHERE ra_filter.response_id = sr.id
-                  AND ra_filter.question_id = :location_filter_question_id
+                  AND ra_filter.question_code = :location_filter_question_code
                   AND TRIM(COALESCE(ra_filter.answer_text, '')) = :location_filter_value
             )";
         }
+    }
+
+    private function buildAnalyticsCountMatrix(
+        array $locationOptions,
+        array $locationFilter,
+        int $baseTotalResponses,
+        int $filteredResponses,
+        array $coverage,
+        array $questionStats
+    ): array {
+        $selectedValue = (string) ($locationFilter['selected_value'] ?? 'all');
+        $territorialRows = [];
+
+        foreach ($locationOptions as $option) {
+            $count = (int) ($option['count'] ?? 0);
+            $value = (string) ($option['value'] ?? '');
+            $territorialRows[] = [
+                'value' => $value,
+                'label' => (string) ($option['label'] ?? $value),
+                'count' => $count,
+                'percentage' => $baseTotalResponses > 0 ? round(($count / $baseTotalResponses) * 100, 1) : 0.0,
+                'first_submission_at' => $option['first_submission_at'] ?? null,
+                'last_submission_at' => $option['last_submission_at'] ?? null,
+                'is_selected' => $selectedValue !== 'all' && $value !== '' && $value === $selectedValue,
+                'has_activity' => $count > 0,
+            ];
+        }
+
+        usort($territorialRows, static function (array $left, array $right): int {
+            return ((int) ($right['is_selected'] ?? false) <=> (int) ($left['is_selected'] ?? false))
+                ?: ((int) ($right['count'] ?? 0) <=> (int) ($left['count'] ?? 0))
+                ?: strcmp((string) ($left['label'] ?? ''), (string) ($right['label'] ?? ''));
+        });
+
+        $visibleTerritorialRows = $selectedValue === 'all'
+            ? $territorialRows
+            : array_values(array_filter($territorialRows, static fn(array $row): bool => (bool) ($row['is_selected'] ?? false)));
+
+        $questionRows = [];
+        $answeredQuestions = 0;
+
+        foreach (array_values($coverage) as $index => $item) {
+            $code = (string) ($item['code'] ?? '');
+            $responses = (int) ($item['responses'] ?? 0);
+            $coveragePercentage = (float) ($item['coverage_percentage'] ?? 0);
+            $stat = $questionStats[$code] ?? null;
+
+            if ($responses > 0) {
+                $answeredQuestions++;
+            }
+
+            $summary = 'Sin respuestas dentro del filtro actual.';
+            $highlightLabel = null;
+            $highlightCount = null;
+            $highlightPercentage = null;
+            $optionBreakdown = [];
+            $otherOptions = [];
+            $otherOptionsSummary = 'Sin lectura adicional.';
+
+            if (is_array($stat)) {
+                if (($stat['type'] ?? '') === 'choice') {
+                    $optionBreakdown = array_values(array_map(static fn(array $option): array => [
+                        'label' => (string) ($option['label'] ?? ''),
+                        'count' => (int) ($option['count'] ?? 0),
+                        'percentage' => (float) ($option['percentage'] ?? 0),
+                    ], array_filter(
+                        (array) ($stat['options'] ?? []),
+                        static fn(array $option): bool => trim((string) ($option['label'] ?? '')) !== ''
+                    )));
+                    $otherOptions = array_slice($optionBreakdown, 1);
+                    $otherOptionsSummary = $this->summarizeAnalyticsOptionRows($otherOptions);
+
+                    $topOption = $stat['options'][0] ?? null;
+                    if (is_array($topOption)) {
+                        $highlightLabel = (string) ($topOption['label'] ?? '');
+                        $highlightCount = (int) ($topOption['count'] ?? 0);
+                        $highlightPercentage = (float) ($topOption['percentage'] ?? 0);
+                        $summary = sprintf(
+                            '%s lidera con %s (%d).',
+                            trim($highlightLabel) !== '' ? $highlightLabel : 'La opción principal',
+                            number_format($highlightPercentage, 1) . '%',
+                            $highlightCount
+                        );
+                    } elseif ($responses > 0) {
+                        $summary = 'Con respuestas registradas, pero sin opciones agregadas suficientes.';
+                    }
+                } elseif (($stat['type'] ?? '') === 'matrix') {
+                    $rowCount = count((array) ($stat['matrix_meta']['rows'] ?? []));
+                    $dimensionCount = count((array) ($stat['matrix_meta']['dimensions'] ?? []));
+                    $summary = $responses > 0
+                        ? sprintf('%d fila(s) y %d dimensión(es) con actividad.', $rowCount, $dimensionCount)
+                        : $summary;
+                } elseif (($stat['type'] ?? '') === 'text') {
+                    $keywordCount = count((array) ($stat['keywords'] ?? []));
+                    $sampleCount = count((array) ($stat['samples'] ?? []));
+                    $summary = $responses > 0
+                        ? ($keywordCount > 0
+                            ? sprintf('%d palabra(s) clave y %d muestra(s) destacadas.', $keywordCount, $sampleCount)
+                            : sprintf('%d respuesta(s) abiertas registradas.', $responses))
+                        : $summary;
+                    $firstKeyword = $stat['keywords'][0] ?? null;
+                    if (is_array($firstKeyword)) {
+                        $highlightLabel = (string) ($firstKeyword['word'] ?? '');
+                        $highlightCount = (int) ($firstKeyword['count'] ?? 0);
+                    }
+                }
+            }
+
+            $questionRows[] = [
+                'position' => $index + 1,
+                'code' => $code,
+                'title' => (string) ($item['title'] ?? ''),
+                'section_title' => (string) ($item['section_title'] ?? 'Sin sección'),
+                'type' => (string) ($item['type'] ?? ''),
+                'type_label' => $this->analyticsQuestionTypeLabel((string) ($item['type'] ?? '')),
+                'responses' => $responses,
+                'coverage_percentage' => $coveragePercentage,
+                'summary' => $summary,
+                'highlight_label' => $highlightLabel,
+                'highlight_count' => $highlightCount,
+                'highlight_percentage' => $highlightPercentage,
+                'option_breakdown' => $optionBreakdown,
+                'other_options' => $otherOptions,
+                'other_options_summary' => $otherOptionsSummary,
+                'has_activity' => $responses > 0,
+            ];
+        }
+
+        return [
+            'territorial' => [
+                'enabled' => (bool) ($locationFilter['enabled'] ?? false),
+                'selected_value' => $selectedValue,
+                'selected_label' => (string) ($locationFilter['selected_label'] ?? 'Todos'),
+                'selection_mode' => $selectedValue === 'all' ? 'all' : 'single',
+                'total_responses' => $baseTotalResponses,
+                'filtered_responses' => $filteredResponses,
+                'rows' => $visibleTerritorialRows,
+                'all_rows' => $territorialRows,
+            ],
+            'questions' => [
+                'filtered_responses' => $filteredResponses,
+                'total_questions' => count($questionRows),
+                'answered_questions' => $answeredQuestions,
+                'rows' => $questionRows,
+            ],
+        ];
+    }
+
+    private function analyticsQuestionTypeLabel(string $type): string
+    {
+        return match ($type) {
+            'single_choice' => 'Selección única',
+            'multiple_choice' => 'Selección múltiple',
+            'rating' => 'Escala',
+            'text', 'textarea' => 'Texto abierto',
+            'matrix' => 'Matriz',
+            default => ucfirst(str_replace('_', ' ', trim($type))),
+        };
+    }
+
+    private function resolveAnalyticsOptionLabel(array $questionMeta, string $optionCode, string $fallbackLabel = ''): string
+    {
+        $normalizedCode = trim($optionCode);
+        if ($normalizedCode !== '') {
+            $optionLabels = is_array($questionMeta['option_labels'] ?? null) ? $questionMeta['option_labels'] : [];
+            if (isset($optionLabels[$normalizedCode])) {
+                return trim((string) $optionLabels[$normalizedCode]);
+            }
+
+            foreach ((array) ($questionMeta['options'] ?? []) as $option) {
+                if (trim((string) ($option['code'] ?? '')) === $normalizedCode) {
+                    return trim((string) ($option['label'] ?? $normalizedCode));
+                }
+            }
+        }
+
+        return trim($fallbackLabel) !== '' ? trim($fallbackLabel) : $normalizedCode;
+    }
+
+    private function analyticsOptionBucketKey(string $label, string $optionCode): string
+    {
+        $normalizedLabel = $this->normalizeAnalyticsOptionBucketLabel($label);
+        if ($normalizedLabel !== '') {
+            return 'label:' . $normalizedLabel;
+        }
+
+        $normalizedCode = trim($optionCode);
+        return $normalizedCode !== '' ? 'code:' . $normalizedCode : 'label:sin-etiqueta';
+    }
+
+    private function normalizeAnalyticsOptionBucketLabel(string $label): string
+    {
+        $normalized = trim($label);
+        if ($normalized === '') {
+            return '';
+        }
+
+        $normalized = preg_replace('/^[A-ZÁÉÍÓÚÑ]\.\s*/u', '', $normalized) ?: $normalized;
+        $normalized = preg_replace('/\s+/', ' ', $normalized) ?: $normalized;
+        $normalized = mb_strtolower($normalized, 'UTF-8');
+        $normalized = strtr($normalized, [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u',
+            'ä' => 'a', 'ë' => 'e', 'ï' => 'i', 'ö' => 'o', 'ü' => 'u',
+            'ñ' => 'n',
+        ]);
+
+        return trim($normalized);
+    }
+
+    private function summarizeAnalyticsOptionRows(array $options): string
+    {
+        $normalized = array_values(array_filter(array_map(static function (array $option): array {
+            return [
+                'label' => trim((string) ($option['label'] ?? '')),
+                'count' => (int) ($option['count'] ?? 0),
+                'percentage' => (float) ($option['percentage'] ?? 0),
+            ];
+        }, $options), static fn(array $option): bool => $option['label'] !== ''));
+
+        if ($normalized === []) {
+            return 'Sin lectura adicional.';
+        }
+
+        return implode(' | ', array_map(
+            static fn(array $option): string => sprintf(
+                '%s · %s (%d)',
+                $option['label'],
+                number_format($option['percentage'], 1) . '%',
+                $option['count']
+            ),
+            $normalized
+        ));
+    }
+
+    public function downloadAnalyticsCountMatrixXlsx(array $analytics): never
+    {
+        $summary = is_array($analytics['summary'] ?? null) ? $analytics['summary'] : [];
+        $survey = is_array($analytics['survey'] ?? null) ? $analytics['survey'] : [];
+        $locationFilter = is_array($analytics['location_filter'] ?? null) ? $analytics['location_filter'] : [];
+        $countMatrix = is_array($analytics['count_matrix'] ?? null) ? $analytics['count_matrix'] : [];
+        $territorial = is_array($countMatrix['territorial'] ?? null) ? $countMatrix['territorial'] : [];
+        $questions = is_array($countMatrix['questions'] ?? null) ? $countMatrix['questions'] : [];
+
+        $summaryRows = [
+            ['Campo', 'Valor'],
+            ['Encuesta', (string) ($survey['name'] ?? 'Encuesta')],
+            ['Vista', (string) ($analytics['report_scope_label'] ?? $summary['report_scope_label'] ?? 'Dashboard principal')],
+            ['Ubicación filtrada', (string) ($locationFilter['selected_label'] ?? 'Todos')],
+            ['Desde', (string) (($summary['date_range']['from'] ?? null) ?: 'Sin límite')],
+            ['Hasta', (string) (($summary['date_range']['to'] ?? null) ?: 'Sin límite')],
+            ['Respuestas analizadas', (int) ($summary['responses'] ?? 0)],
+            ['Preguntas parametrizadas', (int) ($summary['questions'] ?? 0)],
+            ['Secciones', (int) ($summary['sections'] ?? 0)],
+            ['Días con actividad', (int) ($summary['active_days'] ?? 0)],
+            ['Promedio diario', (float) ($summary['average_per_day'] ?? 0)],
+            ['Primera captura', (string) (($summary['first_submission_at'] ?? null) ?: 'Sin registro')],
+            ['Última captura', (string) (($summary['last_submission_at'] ?? null) ?: 'Sin registro')],
+            ['Generado', date('Y-m-d H:i:s')],
+        ];
+
+        $territorialRows = [[
+            'Cantón / ciudad',
+            'Conteo',
+            '% rango',
+            'Primera captura',
+            'Última captura',
+            'Estado',
+        ]];
+
+        foreach ((array) ($territorial['rows'] ?? []) as $row) {
+            $territorialRows[] = [
+                (string) ($row['label'] ?? ''),
+                (int) ($row['count'] ?? 0),
+                (float) ($row['percentage'] ?? 0),
+                (string) (($row['first_submission_at'] ?? null) ?: 'Sin registro'),
+                (string) (($row['last_submission_at'] ?? null) ?: 'Sin registro'),
+                (bool) ($row['is_selected'] ?? false)
+                    ? 'En foco'
+                    : ((int) ($row['count'] ?? 0) > 0 ? 'Con actividad' : 'Sin actividad'),
+            ];
+        }
+
+        $questionRows = [[
+            '#',
+            'Pregunta',
+            'Sección',
+            'Tipo',
+            'Resp.',
+            'Cobertura',
+            'Lectura rápida',
+            'Otras respuestas',
+        ]];
+
+        foreach ((array) ($questions['rows'] ?? []) as $row) {
+            $questionRows[] = [
+                (int) ($row['position'] ?? 0),
+                trim((string) (($row['code'] ?? '') . '. ' . ($row['title'] ?? '')), '. '),
+                (string) ($row['section_title'] ?? 'Sin sección'),
+                (string) ($row['type_label'] ?? $row['type'] ?? ''),
+                (int) ($row['responses'] ?? 0),
+                (float) ($row['coverage_percentage'] ?? 0),
+                $this->buildAnalyticsQuickReadingLabel(is_array($row) ? $row : []),
+                (string) ($row['other_options_summary'] ?? 'Sin lectura adicional.'),
+            ];
+        }
+
+        $filename = Helpers::slugify((string) ($survey['name'] ?? 'reporte')) . '-matriz-conteo';
+        $scope = (string) ($analytics['report_scope'] ?? 'primary');
+        if ($scope === 'special') {
+            $filename .= '-reporte-aparte';
+        }
+        $filename .= '.xlsx';
+
+        Helpers::downloadXlsx($filename, [
+            ['name' => 'Resumen', 'rows' => $summaryRows],
+            ['name' => 'Conteo territorial', 'rows' => $territorialRows],
+            ['name' => 'Conteo por pregunta', 'rows' => $questionRows],
+        ]);
+    }
+
+    private function buildAnalyticsQuickReadingLabel(array $row): string
+    {
+        $highlightLabel = trim((string) ($row['highlight_label'] ?? ''));
+        $highlightCount = $row['highlight_count'] ?? null;
+        $highlightPercentage = $row['highlight_percentage'] ?? null;
+
+        if ($highlightLabel !== '' && $highlightPercentage !== null && $highlightPercentage !== '') {
+            return sprintf(
+                '%s · %s (%d)',
+                $highlightLabel,
+                number_format((float) $highlightPercentage, 1) . '%',
+                (int) $highlightCount
+            );
+        }
+
+        if ($highlightLabel !== '' && $highlightCount !== null && $highlightCount !== '') {
+            return sprintf('%s · %d', $highlightLabel, (int) $highlightCount);
+        }
+
+        return (string) ($row['summary'] ?? 'Sin lectura rápida.');
     }
 
     public function submitResponse(string $slug, array $payload): array
