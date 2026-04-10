@@ -7,6 +7,8 @@ class SurveyService
     private static ?SurveyService $instance = null;
     private Database $db;
     private ?bool $surveyAccessLogTableAvailable = null;
+    private ?bool $assignmentTableAvailable = null;
+    private array $tableExistsCache = [];
     private array $tableColumnsCache = [];
 
     private function __construct()
@@ -47,7 +49,7 @@ class SurveyService
             return true;
         }
 
-        return (string) ($user['role'] ?? '') === 'super_admin' || !$this->tableExists('survey_user_assignments');
+        return (string) ($user['role'] ?? '') === 'super_admin' || !$this->hasAssignmentTable();
     }
 
     private function ensureSurveyReadAccess(int $surveyId, ?array $user = null): void
@@ -87,7 +89,7 @@ class SurveyService
 
     private function ensureSurveyAssignment(int $surveyId, int $userId, ?int $assignedBy = null): void
     {
-        if ($surveyId <= 0 || $userId <= 0 || !$this->tableExists('survey_user_assignments')) {
+        if ($surveyId <= 0 || $userId <= 0 || !$this->hasAssignmentTable()) {
             return;
         }
 
@@ -155,7 +157,8 @@ class SurveyService
              FROM survey_responses sr
              INNER JOIN surveys s ON s.id = sr.survey_id
              {$responseAccess['joins']}
-             WHERE DATE(sr.submitted_at) = CURDATE() {$responseAccess['where']}",
+             WHERE sr.submitted_at >= CURDATE()
+               AND sr.submitted_at < (CURDATE() + INTERVAL 1 DAY) {$responseAccess['where']}",
             $responseAccess['params']
         );
 
@@ -188,41 +191,89 @@ class SurveyService
     public function listSurveys(?array $user = null): array
     {
         $access = $this->buildSurveyAccessConstraint('s', $user);
-        $assignmentCountSelect = $this->tableExists('survey_user_assignments')
-            ? 'COUNT(DISTINCT sua_count.user_id)'
+        $assignmentCountSelect = $this->hasAssignmentTable()
+            ? 'COALESCE(assignment_counts.assigned_user_count, 0)'
             : '0';
-        $assignmentJoin = $this->tableExists('survey_user_assignments')
-            ? 'LEFT JOIN survey_user_assignments sua_count ON sua_count.survey_id = s.id'
+        $assignmentJoin = $this->hasAssignmentTable()
+            ? "LEFT JOIN (
+                    SELECT survey_id, COUNT(*) AS assigned_user_count
+                    FROM survey_user_assignments
+                    GROUP BY survey_id
+                ) assignment_counts ON assignment_counts.survey_id = s.id"
             : '';
 
         $rows = $this->db->fetchAll(
             "SELECT
                 s.*,
-                COUNT(DISTINCT sec.id) AS section_count,
-                COUNT(DISTINCT q.id) AS question_count,
-                COUNT(DISTINCT sr.id) AS response_count,
+                (
+                    SELECT COUNT(*)
+                    FROM survey_sections sec
+                    WHERE sec.survey_id = s.id
+                ) AS section_count,
+                (
+                    SELECT COUNT(*)
+                    FROM survey_questions q
+                    WHERE q.survey_id = s.id
+                ) AS question_count,
+                (
+                    SELECT COUNT(*)
+                    FROM survey_responses sr_count
+                    WHERE sr_count.survey_id = s.id
+                ) AS response_count,
                 {$assignmentCountSelect} AS assigned_user_count
              FROM surveys s
              {$access['joins']}
-             LEFT JOIN survey_sections sec ON sec.survey_id = s.id
-             LEFT JOIN survey_questions q ON q.survey_id = s.id
-             LEFT JOIN survey_responses sr ON sr.survey_id = s.id
              {$assignmentJoin}
              WHERE 1 = 1 {$access['where']}
-             GROUP BY s.id
              ORDER BY COALESCE(s.start_at, s.created_at) DESC, s.id DESC",
             $access['params']
         );
 
-        foreach ($rows as &$row) {
-            $row['settings'] = Helpers::decodeJson($row['settings_json'], []);
-            $row['public_url'] = url('public/index.php?survey=' . urlencode($row['slug']));
-            $row['window_status'] = $this->resolveWindowStatus($row);
-            $row['status_label'] = Helpers::statusLabel($row['status']);
-        }
-        unset($row);
+        return $this->decorateSurveyListingRows($rows);
+    }
 
-        return $rows;
+    public function listPublicSurveys(): array
+    {
+        $rows = $this->db->fetchAll(
+            "SELECT
+                s.*,
+                (
+                    SELECT COUNT(*)
+                    FROM survey_sections sec
+                    WHERE sec.survey_id = s.id
+                ) AS section_count,
+                (
+                    SELECT COUNT(*)
+                    FROM survey_questions q
+                    WHERE q.survey_id = s.id
+                ) AS question_count,
+                0 AS response_count,
+                0 AS assigned_user_count
+             FROM surveys s
+             WHERE s.is_public = 1
+             ORDER BY COALESCE(s.start_at, s.created_at) DESC, s.id DESC"
+        );
+
+        return $this->decorateSurveyListingRows($rows);
+    }
+
+    public function listSurveyOptions(?array $user = null): array
+    {
+        $access = $this->buildSurveyAccessConstraint('s', $user);
+
+        return $this->db->fetchAll(
+            "SELECT
+                s.id,
+                s.name,
+                s.slug,
+                s.start_at,
+                s.created_at
+             FROM surveys s
+             {$access['joins']}
+             WHERE 1 = 1 {$access['where']}
+             ORDER BY COALESCE(s.start_at, s.created_at) DESC, s.id DESC",
+            $access['params']
+        );
     }
 
     public function getSurvey(int $surveyId, ?array $user = null): ?array
@@ -245,7 +296,7 @@ class SurveyService
 
     public function getSurveyBySlug(string $slug, bool $publicOnly = false): ?array
     {
-        $survey = $this->db->fetch('SELECT * FROM surveys WHERE slug = :slug LIMIT 1', [':slug' => $slug]);
+        $survey = $this->getSurveyRecordBySlug($slug);
         if (!$survey) {
             return null;
         }
@@ -517,13 +568,15 @@ class SurveyService
                 sr.submitted_at,
                 s.name AS survey_name,
                 s.slug AS survey_slug,
-                COUNT(ra.id) AS answer_count
+                (
+                    SELECT COUNT(*)
+                    FROM response_answers ra
+                    WHERE ra.response_id = sr.id
+                ) AS answer_count
              FROM survey_responses sr
              INNER JOIN surveys s ON s.id = sr.survey_id
              {$access['joins']}
-             LEFT JOIN response_answers ra ON ra.response_id = sr.id
              WHERE " . implode(' AND ', $where) . $access['where'] . "
-             GROUP BY sr.id
              ORDER BY sr.submitted_at DESC
              LIMIT 500",
             $params + $access['params']
@@ -552,13 +605,31 @@ class SurveyService
             [':response_id' => $responseId]
         );
 
+        $optionsByAnswer = [];
+        $answerIds = array_map(static fn(array $answer): int => (int) $answer['id'], $answers);
+        if ($answerIds !== []) {
+            $placeholder = implode(',', array_fill(0, count($answerIds), '?'));
+            $optionRows = $this->db->fetchAll(
+                "SELECT response_answer_id, option_code, option_label
+                 FROM response_answer_options
+                 WHERE response_answer_id IN ($placeholder)
+                 ORDER BY response_answer_id ASC, id ASC",
+                $answerIds
+            );
+
+            foreach ($optionRows as $optionRow) {
+                $optionsByAnswer[(int) $optionRow['response_answer_id']][] = [
+                    'option_code' => $optionRow['option_code'],
+                    'option_label' => $optionRow['option_label'],
+                ];
+            }
+        }
+
         foreach ($answers as &$answer) {
             $answer['answer_json'] = Helpers::decodeJson($answer['answer_json'], null);
-            $answer['options'] = $this->db->fetchAll(
-                'SELECT option_code, option_label FROM response_answer_options WHERE response_answer_id = :answer_id ORDER BY id ASC',
-                [':answer_id' => $answer['id']]
-            );
+            $answer['options'] = $optionsByAnswer[(int) $answer['id']] ?? [];
         }
+        unset($answer);
 
         $response['metadata'] = Helpers::decodeJson($response['metadata_json'], []);
         $sessionToken = '';
@@ -578,7 +649,7 @@ class SurveyService
 
     public function trackSurveyAccess(string $slug, array $payload = []): array
     {
-        $survey = $this->getSurveyBySlug($slug, false);
+        $survey = $this->getSurveyRecordBySlug($slug);
         if (!$survey || !(bool) ($survey['is_public'] ?? false)) {
             return ['success' => true];
         }
@@ -1480,6 +1551,25 @@ class SurveyService
         }
     }
 
+    private function getSurveyRecordBySlug(string $slug): ?array
+    {
+        $survey = $this->db->fetch('SELECT * FROM surveys WHERE slug = :slug LIMIT 1', [':slug' => $slug]);
+        return $survey ?: null;
+    }
+
+    private function decorateSurveyListingRows(array $rows): array
+    {
+        foreach ($rows as &$row) {
+            $row['settings'] = Helpers::decodeJson($row['settings_json'], []);
+            $row['public_url'] = url('public/index.php?survey=' . urlencode($row['slug']));
+            $row['window_status'] = $this->resolveWindowStatus($row);
+            $row['status_label'] = Helpers::statusLabel($row['status']);
+        }
+        unset($row);
+
+        return $rows;
+    }
+
     private function normalizeDateTime(mixed $value): ?string
     {
         if ($value === null || trim((string) $value) === '') {
@@ -1945,14 +2035,30 @@ class SurveyService
         return $this->surveyAccessLogTableAvailable;
     }
 
+    private function hasAssignmentTable(): bool
+    {
+        if ($this->assignmentTableAvailable !== null) {
+            return $this->assignmentTableAvailable;
+        }
+
+        $this->assignmentTableAvailable = $this->tableExists('survey_user_assignments');
+        return $this->assignmentTableAvailable;
+    }
+
     private function tableExists(string $table): bool
     {
+        if (array_key_exists($table, $this->tableExistsCache)) {
+            return $this->tableExistsCache[$table];
+        }
+
         try {
             $quoted = $this->db->pdo()->quote($table);
-            return (bool) $this->db->fetchColumn("SHOW TABLES LIKE {$quoted}");
+            $this->tableExistsCache[$table] = (bool) $this->db->fetchColumn("SHOW TABLES LIKE {$quoted}");
         } catch (Throwable) {
-            return false;
+            $this->tableExistsCache[$table] = false;
         }
+
+        return $this->tableExistsCache[$table];
     }
 
     private function tableHasColumn(string $table, string $column): bool

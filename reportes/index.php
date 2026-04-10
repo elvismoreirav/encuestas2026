@@ -9,7 +9,7 @@ if (!Database::isInstalled()) {
 auth()->requireLogin();
 auth()->requireInsightsAccess();
 
-$surveyList = surveys()->listSurveys(auth()->user());
+$surveyList = surveys()->listSurveyOptions(auth()->user());
 $selectedSurveyId = (int) ($_GET['survey_id'] ?? ($surveyList[0]['id'] ?? 0));
 $selectedReportScope = strtolower(trim((string) ($_GET['report_scope'] ?? ''))) === 'special' ? 'special' : 'primary';
 

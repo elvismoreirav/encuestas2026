@@ -9,7 +9,7 @@ if (!Database::isInstalled()) {
 auth()->requireLogin();
 auth()->requireInsightsAccess();
 
-$surveyList = surveys()->listSurveys(auth()->user());
+$surveyList = surveys()->listSurveyOptions(auth()->user());
 $pageTitle = 'Respuestas';
 $pageDescription = 'Consulta el histórico de formularios completados y revisa el detalle de cada captura.';
 $currentPage = 'responses';

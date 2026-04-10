@@ -6,7 +6,6 @@ if (!Database::isInstalled()) {
     redirect('install.php');
 }
 
-$allSurveys = array_values(array_filter(surveys()->listSurveys(), static fn(array $survey): bool => (bool) $survey['is_public']));
 $selectedSlug = trim((string) ($_GET['survey'] ?? ''));
 $selectedSurvey = null;
 $notFoundPublicSurvey = false;
@@ -19,6 +18,7 @@ if ($selectedSlug !== '') {
     $notFoundPublicSurvey = $selectedSurvey === null;
 }
 
+$allSurveys = !$selectedSurvey ? surveys()->listPublicSurveys() : [];
 $canRespond = $selectedSurvey && (bool) $selectedSurvey['is_public'] && in_array($selectedSurvey['window_status'], ['active', 'closing_soon'], true);
 $landingTitle = count($allSurveys) === 1 ? 'Encuesta disponible' : 'Seleccione una encuesta';
 $selectedIntroText = trim((string) ($selectedSurvey['intro_text'] ?? ''));

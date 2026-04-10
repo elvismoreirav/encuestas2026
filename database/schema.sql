@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS survey_sections (
     settings_json LONGTEXT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_sections_survey_sort (survey_id, sort_order, id),
     CONSTRAINT fk_sections_survey FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -74,6 +75,8 @@ CREATE TABLE IF NOT EXISTS survey_questions (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_survey_question_code (survey_id, code),
+    KEY idx_questions_survey_sort (survey_id, sort_order, id),
+    KEY idx_questions_section_sort (section_id, sort_order, id),
     CONSTRAINT fk_questions_survey FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE CASCADE,
     CONSTRAINT fk_questions_section FOREIGN KEY (section_id) REFERENCES survey_sections(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -89,6 +92,7 @@ CREATE TABLE IF NOT EXISTS survey_question_options (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_question_option_code (question_id, option_code),
+    KEY idx_question_options_sort (question_id, sort_order, id),
     CONSTRAINT fk_question_options_question FOREIGN KEY (question_id) REFERENCES survey_questions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -111,6 +115,7 @@ CREATE TABLE IF NOT EXISTS survey_responses (
     referrer VARCHAR(255) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_survey_submitted (survey_id, submitted_at),
+    KEY idx_responses_submitted_at (submitted_at),
     KEY idx_response_session (session_token),
     CONSTRAINT fk_responses_survey FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
