@@ -965,6 +965,7 @@ function renderQuestion(question) {
                         <span class="question-support-item">${escapeHtml(structureHint)}</span>
                     </div>
                     ${question.help_text ? `<p class="question-help-text">${escapeHtml(question.help_text)}</p>` : ''}
+                    ${Array.isArray(question.visibility_rules) && question.visibility_rules.length ? `<span class="question-conditional-hint">Pregunta condicional</span>` : ''}
                 </div>
                 <div class="question-badges">
                     <span class="question-status ${isComplete ? 'question-status-complete' : 'question-status-pending'}">
@@ -1033,6 +1034,12 @@ function validateStep(section) {
     return true;
 }
 
+function getVisibleQuestionCodesSet() {
+    return new Set(getVisibleSections().flatMap((s) => s.questions.map((q) => q.code)));
+}
+
+let previousVisibleCodes = getVisibleQuestionCodesSet();
+
 function renderForm(options = {}) {
     const viewportSnapshot = captureQuestionViewport(options.preserveQuestionCode || null);
     pruneInvisibleAnswers();
@@ -1073,6 +1080,22 @@ function renderForm(options = {}) {
 
     bindFormEvents(section);
     restoreQuestionViewport(viewportSnapshot);
+
+    const currentVisibleCodes = getVisibleQuestionCodesSet();
+    const newlyRevealed = [...currentVisibleCodes].filter((code) => !previousVisibleCodes.has(code));
+    previousVisibleCodes = currentVisibleCodes;
+
+    if (newlyRevealed.length > 0 && !options.alignActiveStep) {
+        const firstNewCode = newlyRevealed[0];
+        requestAnimationFrame(() => {
+            const card = getQuestionCard(firstNewCode);
+            if (card) {
+                card.scrollIntoView({behavior: 'smooth', block: 'center'});
+                card.classList.add('is-newly-revealed');
+                setTimeout(() => card.classList.remove('is-newly-revealed'), 1600);
+            }
+        });
+    }
 }
 
 function bindFormEvents(section) {
@@ -1165,6 +1188,25 @@ function bindFormEvents(section) {
             clearQuestionState(questionCode);
             scheduleDraftSave();
             renderForm({preserveQuestionCode: questionCode});
+        });
+    });
+
+    form.querySelectorAll('.option-grid, .rating-grid').forEach((grid) => {
+        grid.addEventListener('keydown', (event) => {
+            if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+            const cards = Array.from(grid.querySelectorAll('.choice-card'));
+            const currentIndex = cards.findIndex((card) => card.contains(document.activeElement) || card === document.activeElement);
+            if (currentIndex === -1) return;
+            event.preventDefault();
+            const direction = (event.key === 'ArrowDown' || event.key === 'ArrowRight') ? 1 : -1;
+            const nextIndex = Math.max(0, Math.min(cards.length - 1, currentIndex + direction));
+            if (nextIndex !== currentIndex) {
+                const input = cards[nextIndex].querySelector('input');
+                if (input) {
+                    input.focus();
+                    cards[nextIndex].scrollIntoView({behavior: 'smooth', block: 'nearest'});
+                }
+            }
         });
     });
 
@@ -1272,10 +1314,11 @@ function bindFormEvents(section) {
 
 restoreDraft();
 pruneInvisibleAnswers();
-window.addEventListener('beforeunload', () => {
+window.addEventListener('beforeunload', (event) => {
     if (Object.keys(answers).length > 0) {
         pruneInvisibleAnswers();
         persistDraftNow();
+        event.preventDefault();
     }
 });
 trackSurveyAccess();

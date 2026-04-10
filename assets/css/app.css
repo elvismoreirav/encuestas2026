@@ -1737,6 +1737,7 @@ th {
     position: relative;
     overflow: hidden;
     scroll-snap-align: start;
+    transition: background 300ms ease, color 300ms ease, border-color 300ms ease;
 }
 
 .survey-step::after {
@@ -1909,10 +1910,12 @@ th {
     height: 100%;
     border-radius: inherit;
     background: linear-gradient(135deg, var(--shalom-primary), var(--shalom-primary-light));
+    transition: width 400ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .section-progress-track-overall span {
     background: linear-gradient(135deg, var(--shalom-gold), #b08c44);
+    transition: width 400ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .section-outline-card {
@@ -2149,6 +2152,7 @@ th {
     overflow: hidden;
     scroll-margin-top: 18px;
     scroll-margin-bottom: 128px;
+    transition: border-color 350ms ease, box-shadow 350ms ease;
 }
 
 .question-card::before {
@@ -2681,6 +2685,34 @@ th {
     color: var(--text-soft);
 }
 
+.question-card.is-newly-revealed {
+    animation: revealPulse 1.6s ease;
+}
+
+@keyframes revealPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(30, 77, 57, 0.3);
+    }
+    30% {
+        box-shadow: 0 0 0 8px rgba(30, 77, 57, 0.12);
+    }
+    100% {
+        box-shadow: var(--shadow);
+    }
+}
+
+.question-conditional-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(214, 194, 154, 0.18);
+    color: var(--shalom-gold-dark, #7a6528);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
 @keyframes rise {
     from {
         opacity: 0;
@@ -2912,7 +2944,9 @@ th {
         bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
         z-index: 24;
         backdrop-filter: blur(16px);
-        background: rgba(255, 255, 255, 0.94);
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 -4px 24px rgba(17, 32, 25, 0.1), 0 -1px 0 rgba(30, 77, 57, 0.08);
+        border: 1px solid rgba(30, 77, 57, 0.12);
     }
 
     .form-actions .btn {
