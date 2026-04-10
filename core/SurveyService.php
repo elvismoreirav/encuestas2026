@@ -790,13 +790,13 @@ class SurveyService
                     ra.question_id,
                     ra.question_code,
                     ra.question_prompt,
-                    rao.option_code,
+                    MIN(rao.option_code) AS option_code,
                     rao.option_label,
                     COUNT(*) AS total
                  FROM response_answer_options rao
                  INNER JOIN response_answers ra ON ra.id = rao.response_answer_id
                  WHERE ra.response_id IN ($placeholder)
-                 GROUP BY ra.question_id, ra.question_code, ra.question_prompt, rao.option_code, rao.option_label
+                 GROUP BY ra.question_id, ra.question_code, ra.question_prompt, rao.option_label
                  ORDER BY ra.question_id, total DESC",
                 $responseIds
             );
@@ -1120,12 +1120,12 @@ class SurveyService
 
         if (in_array($type, ['single_choice', 'multiple_choice', 'rating'], true)) {
             $rows = $this->db->fetchAll(
-                "SELECT rao.option_code AS value, rao.option_label AS label, COUNT(DISTINCT ra.response_id) AS total
+                "SELECT MIN(rao.option_code) AS value, rao.option_label AS label, COUNT(DISTINCT ra.response_id) AS total
                  FROM survey_responses sr
                  INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_id = :location_question_id
                  INNER JOIN response_answer_options rao ON rao.response_answer_id = ra.id
                  WHERE " . implode(' AND ', $where) . '
-                 GROUP BY rao.option_code, rao.option_label',
+                 GROUP BY rao.option_label',
                 [':location_question_id' => $questionId] + $params
             );
 
