@@ -1028,8 +1028,57 @@ th {
     padding: 12px 14px;
 }
 
-.editor-preview-matrix {
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+.editor-preview-matrix-shell {
+    display: grid;
+    gap: 16px;
+}
+
+.editor-preview-matrix-shell .matrix-shell {
+    margin-top: 0;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+
+.editor-preview-matrix-shell .matrix-head-grid,
+.editor-preview-matrix-shell .matrix-rows {
+    width: max-content;
+    min-width: 100%;
+}
+
+.editor-preview-matrix-head {
+    display: grid;
+    gap: 6px;
+}
+
+.editor-preview-matrix-head strong {
+    font-size: 0.94rem;
+    line-height: 1.35;
+}
+
+.editor-preview-matrix-head small,
+.editor-preview-matrix-code {
+    color: var(--text-soft);
+}
+
+.editor-preview-matrix-code {
+    display: block;
+    line-height: 1.4;
+}
+
+.editor-question-preview .matrix-options {
+    display: grid;
+    gap: 8px;
+}
+
+.editor-preview-matrix-option {
+    width: 100%;
+    cursor: default;
+    align-items: flex-start;
+}
+
+.editor-preview-matrix-option .matrix-option-label {
+    font-size: 0.85rem;
+    line-height: 1.35;
 }
 
 .modal {
