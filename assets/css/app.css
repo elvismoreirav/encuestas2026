@@ -940,6 +940,98 @@ th {
     margin-top: 10px;
 }
 
+.question-preview-actions {
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.question-preview-summary {
+    flex: 1 1 360px;
+}
+
+.editor-question-preview {
+    margin-top: 16px;
+    padding: 18px;
+    border-radius: 22px;
+    border: 1px dashed rgba(30, 77, 57, 0.16);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(243, 241, 234, 0.9));
+    display: grid;
+    gap: 18px;
+}
+
+.editor-question-preview-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: flex-start;
+}
+
+.editor-question-preview-copy {
+    display: grid;
+    gap: 8px;
+}
+
+.editor-question-preview-copy strong {
+    font-size: 1.04rem;
+    color: var(--text);
+}
+
+.editor-question-preview-copy p {
+    margin: 0;
+    color: var(--text-soft);
+}
+
+.editor-question-preview-field {
+    display: grid;
+    gap: 10px;
+}
+
+.editor-question-preview-label {
+    font-size: 0.8rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+}
+
+.editor-preview-choice-card,
+.editor-question-preview .matrix-option,
+.editor-question-preview .public-control {
+    cursor: default;
+}
+
+.editor-preview-choice-card:hover,
+.editor-question-preview .matrix-option:hover {
+    transform: none;
+}
+
+.editor-preview-empty {
+    display: grid;
+    gap: 6px;
+    padding: 14px 16px;
+    border-radius: 18px;
+    border: 1px solid rgba(180, 35, 24, 0.16);
+    background: linear-gradient(180deg, rgba(180, 35, 24, 0.08), rgba(180, 35, 24, 0.03));
+    color: var(--danger);
+}
+
+.editor-preview-empty p {
+    margin: 0;
+}
+
+.editor-preview-empty-compact {
+    gap: 4px;
+    padding: 12px 14px;
+}
+
+.editor-preview-matrix {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
 .modal {
     position: fixed;
     inset: 0;
@@ -3587,6 +3679,12 @@ th {
     .choice-card,
     .rating-card {
         min-height: auto;
+    }
+
+    .question-preview-actions,
+    .editor-question-preview-head {
+        flex-direction: column;
+        align-items: stretch;
     }
 
     .question-rail {
