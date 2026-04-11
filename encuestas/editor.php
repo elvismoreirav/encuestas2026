@@ -47,6 +47,241 @@ $sectionSummaries = array_map(static function (array $section): array {
     ];
 }, $survey['sections']);
 
+function editor_question_interaction_hint(array $question): string
+{
+    $type = (string) ($question['question_type'] ?? '');
+
+    if ($type === 'rating') {
+        return 'Seleccione una valoración';
+    }
+
+    if ($type === 'multiple_choice') {
+        return 'Puede marcar varias opciones';
+    }
+
+    if ($type === 'single_choice') {
+        return 'Seleccione una sola opción';
+    }
+
+    if ($type === 'matrix') {
+        $rows = is_array($question['settings']['matrix']['rows'] ?? null) ? $question['settings']['matrix']['rows'] : [];
+        return $rows !== [] ? 'Complete ' . count($rows) . ' filas' : 'Complete la matriz';
+    }
+
+    if ($type === 'textarea') {
+        return 'Escriba una respuesta extendida';
+    }
+
+    return 'Ingrese su respuesta';
+}
+
+function editor_question_structure_hint(array $question): string
+{
+    $type = (string) ($question['question_type'] ?? '');
+
+    if ($type === 'matrix') {
+        $dimensions = is_array($question['settings']['matrix']['dimensions'] ?? null) ? $question['settings']['matrix']['dimensions'] : [];
+        return $dimensions !== [] ? count($dimensions) . ' columnas de evaluación' : 'Formato matricial';
+    }
+
+    $options = is_array($question['options'] ?? null) ? $question['options'] : [];
+    if ($options !== []) {
+        return count($options) . ' opciones disponibles';
+    }
+
+    return !empty($question['placeholder']) ? 'Placeholder configurado' : ((bool) ($question['is_required'] ?? false) ? 'Respuesta requerida' : 'Campo opcional');
+}
+
+function editor_question_preview_state(array $question): array
+{
+    $type = (string) ($question['question_type'] ?? '');
+    $options = is_array($question['options'] ?? null) ? $question['options'] : [];
+
+    if (in_array($type, ['single_choice', 'multiple_choice', 'rating'], true)) {
+        $optionCount = count($options);
+
+        if ($optionCount === 0) {
+            return [
+                'label' => 'Sin opciones',
+                'class' => 'chip chip-warning',
+                'message' => 'Esta pregunta todavía no tiene respuestas configuradas.',
+            ];
+        }
+
+        return [
+            'label' => 'Vista previa lista',
+            'class' => 'chip chip-muted',
+            'message' => $optionCount . ' ' . ($optionCount === 1 ? 'opción configurada para validación rápida.' : 'opciones configuradas para validación rápida.'),
+        ];
+    }
+
+    if ($type === 'matrix') {
+        $matrix = is_array($question['settings']['matrix'] ?? null) ? $question['settings']['matrix'] : [];
+        $rows = is_array($matrix['rows'] ?? null) ? $matrix['rows'] : [];
+        $dimensions = is_array($matrix['dimensions'] ?? null) ? $matrix['dimensions'] : [];
+        $configuredDimensions = count(array_filter($dimensions, static function (array $dimension): bool {
+            return is_array($dimension['options'] ?? null) && $dimension['options'] !== [];
+        }));
+
+        if ($rows === [] || $dimensions === [] || $configuredDimensions === 0) {
+            return [
+                'label' => 'Matriz incompleta',
+                'class' => 'chip chip-warning',
+                'message' => 'Agregue filas, columnas y opciones para revisar esta matriz sin abrir el modal.',
+            ];
+        }
+
+        return [
+            'label' => 'Matriz lista',
+            'class' => 'chip chip-muted',
+            'message' => count($rows) . ' filas y ' . count($dimensions) . ' columnas configuradas para validación rápida.',
+        ];
+    }
+
+    if (!empty($question['placeholder'])) {
+        return [
+            'label' => 'Placeholder listo',
+            'class' => 'chip chip-muted',
+            'message' => 'El campo abierto ya tiene una guía visible para captura.',
+        ];
+    }
+
+    return [
+        'label' => 'Campo abierto',
+        'class' => 'chip chip-muted',
+        'message' => 'Puede validar el enunciado y la captura esperada desde esta tarjeta.',
+    ];
+}
+
+function editor_render_question_preview(array $question): string
+{
+    $type = (string) ($question['question_type'] ?? '');
+    $options = is_array($question['options'] ?? null) ? $question['options'] : [];
+    $placeholder = trim((string) ($question['placeholder'] ?? ''));
+    $matrix = is_array($question['settings']['matrix'] ?? null) ? $question['settings']['matrix'] : [];
+    $rows = is_array($matrix['rows'] ?? null) ? $matrix['rows'] : [];
+    $dimensions = is_array($matrix['dimensions'] ?? null) ? $matrix['dimensions'] : [];
+    $ratingAccents = ['#027a48', '#2a6b4f', '#8b7b52', '#b54708', '#b42318'];
+
+    ob_start();
+    ?>
+    <?php if (in_array($type, ['single_choice', 'multiple_choice', 'rating'], true)): ?>
+        <?php if ($options === []): ?>
+            <div class="editor-preview-empty">
+                <strong>Faltan opciones por cargar</strong>
+                <p>Agregue al menos una opción de respuesta para habilitar la vista previa completa de esta pregunta.</p>
+            </div>
+        <?php else: ?>
+            <div class="<?= e($type === 'rating' ? 'rating-grid' : 'option-grid columns-2') ?>" aria-hidden="true">
+                <?php foreach ($options as $index => $option): ?>
+                    <?php
+                    $classes = ['choice-card', 'editor-preview-choice-card'];
+                    if ($type === 'multiple_choice') {
+                        $classes[] = 'checkbox-card';
+                    }
+                    if ($type === 'rating') {
+                        $classes[] = 'rating-card';
+                    }
+
+                    $optionCode = trim((string) ($option['code'] ?? ''));
+                    $optionLabel = trim((string) ($option['label'] ?? ''));
+                    $captionBits = [];
+                    if ($optionCode !== '') {
+                        $captionBits[] = 'Código ' . $optionCode;
+                    }
+                    if (!empty($option['is_other'])) {
+                        $captionBits[] = 'Opción abierta';
+                    }
+                    $style = $type === 'rating'
+                        ? ' style="--rating-accent:' . e($ratingAccents[$index % count($ratingAccents)]) . ';"'
+                        : '';
+                    ?>
+                    <label class="<?= e(implode(' ', $classes)) ?>"<?= $style ?>>
+                        <input class="choice-input" type="<?= $type === 'multiple_choice' ? 'checkbox' : 'radio' ?>" disabled>
+                        <span class="choice-indicator" aria-hidden="true"></span>
+                        <span class="choice-body">
+                            <?php if ($type === 'rating'): ?>
+                                <span class="rating-scale">Escala <?= $index + 1 ?></span>
+                            <?php endif; ?>
+                            <span class="choice-label"><?= e($optionLabel !== '' ? $optionLabel : ($optionCode !== '' ? $optionCode : 'Sin etiqueta')) ?></span>
+                            <?php if ($captionBits !== []): ?>
+                                <span class="choice-caption"><?= e(implode(' · ', $captionBits)) ?></span>
+                            <?php endif; ?>
+                        </span>
+                    </label>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    <?php elseif ($type === 'matrix'): ?>
+        <?php if ($rows === [] || $dimensions === []): ?>
+            <div class="editor-preview-empty">
+                <strong>La matriz aún no está lista</strong>
+                <p>Configure filas y columnas para revisar esta pregunta desde el editor.</p>
+            </div>
+        <?php else: ?>
+            <div class="question-matrix-list editor-preview-matrix">
+                <div class="question-matrix-card">
+                    <div class="question-matrix-dimension">
+                        <header>
+                            <strong>Filas evaluadas</strong>
+                            <small><?= count($rows) ?> registradas</small>
+                        </header>
+                        <div class="question-matrix-dimensions">
+                            <?php foreach (array_slice($rows, 0, 6) as $row): ?>
+                                <span><?= e((string) ($row['label'] ?? $row['code'] ?? 'Fila')) ?></span>
+                            <?php endforeach; ?>
+                            <?php if (count($rows) > 6): ?>
+                                <span>+<?= count($rows) - 6 ?> filas</span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+                <?php foreach ($dimensions as $dimension): ?>
+                    <?php
+                    $dimensionOptions = is_array($dimension['options'] ?? null) ? $dimension['options'] : [];
+                    $dimensionLabel = trim((string) ($dimension['label'] ?? $dimension['code'] ?? 'Dimensión'));
+                    ?>
+                    <div class="question-matrix-card">
+                        <div class="question-matrix-dimension">
+                            <header>
+                                <strong><?= e($dimensionLabel !== '' ? $dimensionLabel : 'Dimensión') ?></strong>
+                                <small><?= count($dimensionOptions) ?> <?= count($dimensionOptions) === 1 ? 'opción' : 'opciones' ?></small>
+                            </header>
+                            <?php if ($dimensionOptions === []): ?>
+                                <div class="editor-preview-empty editor-preview-empty-compact">
+                                    <strong>Sin opciones</strong>
+                                    <p>Agregue respuestas posibles para esta dimensión.</p>
+                                </div>
+                            <?php else: ?>
+                                <div class="question-matrix-dimensions">
+                                    <?php foreach (array_slice($dimensionOptions, 0, 5) as $option): ?>
+                                        <span><?= e((string) ($option['label'] ?? $option['code'] ?? 'Sin etiqueta')) ?></span>
+                                    <?php endforeach; ?>
+                                    <?php if (count($dimensionOptions) > 5): ?>
+                                        <span>+<?= count($dimensionOptions) - 5 ?> opciones</span>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    <?php else: ?>
+        <div class="editor-question-preview-field">
+            <label class="editor-question-preview-label"><?= $type === 'textarea' ? 'Respuesta abierta' : 'Respuesta esperada' ?></label>
+            <?php if ($type === 'textarea'): ?>
+                <textarea class="public-control public-textarea" disabled placeholder="<?= e($placeholder !== '' ? $placeholder : 'El encuestado escribirá aquí su respuesta.') ?>"></textarea>
+            <?php else: ?>
+                <input class="public-control" type="text" disabled placeholder="<?= e($placeholder !== '' ? $placeholder : 'El encuestado escribirá aquí su respuesta.') ?>">
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
+    <?php
+
+    return trim((string) ob_get_clean());
+}
+
 require TEMPLATES_PATH . '/admin_header.php';
 ?>
 <section class="panel">
@@ -172,6 +407,7 @@ require TEMPLATES_PATH . '/admin_header.php';
                                     $question['help_text'] ?? '',
                                     implode(' ', array_map(static fn(array $option): string => (string) ($option['label'] ?? ''), $question['options'] ?? [])),
                                 ];
+                                $previewState = editor_question_preview_state($question);
                                 ?>
                                 <article
                                     class="question-item"
@@ -210,6 +446,35 @@ require TEMPLATES_PATH . '/admin_header.php';
                                             <?php endif; ?>
                                         </div>
                                     <?php endif; ?>
+                                    <div class="question-preview-actions">
+                                        <div class="question-support question-preview-summary">
+                                            <span class="question-support-item"><?= e(editor_question_interaction_hint($question)) ?></span>
+                                            <span class="question-support-item"><?= e(editor_question_structure_hint($question)) ?></span>
+                                            <span class="<?= e($previewState['class']) ?>"><?= e($previewState['label']) ?></span>
+                                        </div>
+                                        <button
+                                            class="btn btn-secondary btn-compact js-toggle-question-preview"
+                                            type="button"
+                                            data-question-preview-toggle="question-preview-<?= (int) $question['id'] ?>"
+                                            aria-expanded="false"
+                                        >
+                                            Ver vista previa
+                                        </button>
+                                    </div>
+                                    <div class="editor-question-preview" id="question-preview-<?= (int) $question['id'] ?>" hidden>
+                                        <div class="editor-question-preview-head">
+                                            <div class="editor-question-preview-copy">
+                                                <div class="question-kicker">Vista previa</div>
+                                                <strong><?= e($question['code']) ?>. <?= e($question['prompt']) ?></strong>
+                                                <p><?= e($previewState['message']) ?></p>
+                                                <?php if ($question['help_text']): ?>
+                                                    <p><?= e($question['help_text']) ?></p>
+                                                <?php endif; ?>
+                                            </div>
+                                            <span class="<?= e($previewState['class']) ?>"><?= e($previewState['label']) ?></span>
+                                        </div>
+                                        <?= editor_render_question_preview($question) ?>
+                                    </div>
                                 </article>
                             <?php endforeach; ?>
                         <?php endif; ?>
@@ -479,6 +744,16 @@ function syncSectionToggleButton(button, body) {
     button.textContent = body.hidden ? 'Expandir' : 'Contraer';
 }
 
+function syncQuestionPreviewButton(button, panel) {
+    if (!button || !panel) {
+        return;
+    }
+
+    const expanded = !panel.hidden;
+    button.textContent = expanded ? 'Ocultar vista previa' : 'Ver vista previa';
+    button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
 function setSectionsCollapsed(collapsed) {
     document.querySelectorAll('[data-section-body]').forEach((body) => {
         body.hidden = collapsed;
@@ -565,6 +840,21 @@ document.querySelectorAll('.js-toggle-section').forEach((button) => {
         body.hidden = !body.hidden;
         syncSectionToggleButton(button, body);
     });
+});
+
+document.querySelectorAll('.js-toggle-question-preview').forEach((button) => {
+    button.addEventListener('click', () => {
+        const panel = document.getElementById(button.dataset.questionPreviewToggle || '');
+        if (!panel) {
+            return;
+        }
+
+        panel.hidden = !panel.hidden;
+        syncQuestionPreviewButton(button, panel);
+    });
+
+    const panel = document.getElementById(button.dataset.questionPreviewToggle || '');
+    syncQuestionPreviewButton(button, panel);
 });
 
 document.querySelectorAll('.js-edit-section').forEach((button) => {
