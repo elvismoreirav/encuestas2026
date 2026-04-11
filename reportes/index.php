@@ -75,15 +75,22 @@ require TEMPLATES_PATH . '/admin_header.php';
 <div class="grid-cards" id="statsSummaryCards"></div>
 
 <section class="stats-grid">
-    <article class="chart-card report-chart-card">
+    <article class="chart-card report-chart-card location-chart-card">
         <div class="report-chart-head">
             <span class="chip chip-muted">Territorio</span>
             <strong>Distribución por ciudad / cantón</strong>
             <p id="locationChartDescription">Participación registrada por ciudad o cantón dentro del rango aplicado.</p>
         </div>
+        <div class="location-view-tabs">
+            <div class="segmented-actions" id="locationViewButtons">
+                <button class="segmented-button active" type="button" data-loc-view="chart">Gráfico</button>
+                <button class="segmented-button" type="button" data-loc-view="table">Tabla</button>
+            </div>
+        </div>
         <div class="report-canvas-wrap" id="locationChartWrap">
             <canvas id="locationChart" height="240"></canvas>
         </div>
+        <div id="locationTableWrap" style="display:none;"></div>
     </article>
     <article class="chart-card report-chart-card">
         <div class="report-chart-head">
@@ -232,7 +239,7 @@ require TEMPLATES_PATH . '/admin_header.php';
     <div class="panel-header">
         <div>
             <h2>Matrices comparativas</h2>
-            <p>Comparativos 100% apilados para percepción, intención y asociación por personaje o fila de matriz.</p>
+            <p>Comparativos por dimensión con vista de gráfico apilado, tabla de calor y resumen numérico.</p>
         </div>
     </div>
     <div id="matrixInsights" class="stack"></div>
@@ -1070,11 +1077,38 @@ function mountCanvas(wrapperId, canvasId) {
     return document.getElementById(canvasId);
 }
 
+let lastLocationData = null;
+
+function buildLocationTable(rows, selectedValue) {
+    if (!rows.length) return buildEmptyState('Sin datos territoriales.');
+    const totalCount = rows.reduce((s, r) => s + Number(r.count || 0), 0);
+    const tableRows = rows.map((row, i) => {
+        const isSelected = selectedValue && row.value === selectedValue;
+        const pct = Number(row.percentage || 0);
+        const barWidth = Math.max(2, pct);
+        return `<tr class="${isSelected ? 'location-row-selected' : ''}">
+            <td class="location-table-rank">${i + 1}</td>
+            <td class="location-table-name">${escapeHtml(row.label)}</td>
+            <td class="location-table-bar-cell"><div class="location-table-bar" style="width:${barWidth}%"></div></td>
+            <td class="text-right"><strong>${Number(row.count || 0)}</strong></td>
+            <td class="text-right">${formatPercentage(pct)}</td>
+        </tr>`;
+    }).join('');
+
+    return `<div class="matrix-table-scroll"><table class="matrix-heatmap-table location-detail-table">
+        <thead><tr><th>#</th><th>Ubicación</th><th>Distribución</th><th class="text-right">Respuestas</th><th class="text-right">%</th></tr></thead>
+        <tbody>${tableRows}</tbody>
+        <tfoot><tr><th></th><th><strong>Total</strong></th><th></th><th class="text-right"><strong>${totalCount}</strong></th><th class="text-right"><strong>100%</strong></th></tr></tfoot>
+    </table></div>`;
+}
+
 function renderLocationChart(data) {
-    const wrapper = document.getElementById('locationChartWrap');
+    const chartWrapper = document.getElementById('locationChartWrap');
+    const tableWrapper = document.getElementById('locationTableWrap');
     const description = document.getElementById('locationChartDescription');
     const filter = data.location_filter || {};
     const rows = Array.isArray(data.location_distribution) ? data.location_distribution : [];
+    lastLocationData = {filter, rows};
 
     if (description) {
         description.textContent = filter.enabled
@@ -1085,12 +1119,14 @@ function renderLocationChart(data) {
     }
 
     if (!filter.enabled) {
-        wrapper.innerHTML = buildEmptyState('La encuesta actual no tiene una primera pregunta disponible para segmentación por ciudad.');
+        chartWrapper.innerHTML = buildEmptyState('La encuesta actual no tiene una primera pregunta disponible para segmentación por ciudad.');
+        tableWrapper.innerHTML = '';
         return;
     }
 
     if (!rows.length || !window.Chart) {
-        wrapper.innerHTML = buildEmptyState('La distribución por ciudad o cantón aparecerá cuando existan respuestas dentro del rango seleccionado.');
+        chartWrapper.innerHTML = buildEmptyState('La distribución por ciudad o cantón aparecerá cuando existan respuestas dentro del rango seleccionado.');
+        tableWrapper.innerHTML = '';
         return;
     }
 
@@ -1098,14 +1134,19 @@ function renderLocationChart(data) {
     const selectedValue = filter.selected_value && filter.selected_value !== 'all' ? filter.selected_value : null;
     const colors = rows.map((row, index) => {
         if (selectedValue && row.value === selectedValue) {
-            return {
-                solid: '#1e4d39',
-                fill: 'rgba(30, 77, 57, 0.34)',
-            };
+            return {solid: '#1e4d39', fill: 'rgba(30, 77, 57, 0.34)'};
         }
-
         return getSeriesColor(index + 2);
     });
+
+    if (useHorizontal) {
+        const adaptiveHeight = Math.max(280, rows.length * 34 + 60);
+        chartWrapper.style.height = `${adaptiveHeight}px`;
+        chartWrapper.style.minHeight = `${adaptiveHeight}px`;
+    } else {
+        chartWrapper.style.height = '';
+        chartWrapper.style.minHeight = '';
+    }
 
     const canvas = mountCanvas('locationChartWrap', 'locationChart');
     locationChart = new Chart(canvas, {
@@ -1141,13 +1182,20 @@ function renderLocationChart(data) {
                 [useHorizontal ? 'x' : 'y']: {
                     beginAtZero: true,
                     max: 100,
-                    ticks: {
-                        callback: (value) => `${value}%`,
-                    },
+                    ticks: {callback: (value) => `${value}%`},
                 },
             },
         },
     });
+
+    tableWrapper.innerHTML = buildLocationTable(rows, selectedValue);
+}
+
+function toggleLocationView(view) {
+    const chartWrapper = document.getElementById('locationChartWrap');
+    const tableWrapper = document.getElementById('locationTableWrap');
+    chartWrapper.style.display = view === 'chart' ? '' : 'none';
+    tableWrapper.style.display = view === 'table' ? '' : 'none';
 }
 
 function renderTrendChart(data) {
@@ -1674,6 +1722,107 @@ function getMatrixDimensionOptions(detail, dimension) {
     }));
 }
 
+function buildMatrixHeatmapTable(question, dimension, rows, options) {
+    const headerCells = options.map((opt, i) => `<th class="matrix-heatmap-th"><span class="color-dot" style="background:${getSeriesColor(i).solid}"></span>${escapeHtml(shortLabel(opt.label, 20))}</th>`).join('');
+    const bodyRows = rows.map((row) => {
+        const distribution = (((question.matrix || {})[row.code] || {})[dimension.code]) || {};
+        const total = Object.values(distribution).reduce((s, v) => s + Number(v || 0), 0);
+        const cells = options.map((opt, i) => {
+            const count = Number(distribution[opt.code] || 0);
+            const pct = total > 0 ? (count / total) * 100 : 0;
+            const intensity = Math.min(pct / 100, 1);
+            const bg = `rgba(30, 77, 57, ${(intensity * 0.28).toFixed(2)})`;
+            return `<td class="matrix-heatmap-cell" style="background:${bg}"><strong>${pct.toFixed(1)}%</strong><span class="matrix-cell-count">${count}</span></td>`;
+        }).join('');
+        return `<tr><td class="matrix-heatmap-label">${escapeHtml(shortLabel(row.label, 32))}</td>${cells}</tr>`;
+    }).join('');
+
+    return `<div class="matrix-table-scroll"><table class="matrix-heatmap-table"><thead><tr><th class="matrix-heatmap-th matrix-heatmap-corner">Fila</th>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+}
+
+function buildMatrixSummaryCards(question, dimension, rows, options) {
+    const totals = {};
+    options.forEach((opt) => { totals[opt.code] = 0; });
+    let grandTotal = 0;
+    rows.forEach((row) => {
+        const distribution = (((question.matrix || {})[row.code] || {})[dimension.code]) || {};
+        options.forEach((opt) => {
+            const count = Number(distribution[opt.code] || 0);
+            totals[opt.code] += count;
+            grandTotal += count;
+        });
+    });
+
+    return options.map((opt, i) => {
+        const count = totals[opt.code];
+        const pct = grandTotal > 0 ? ((count / grandTotal) * 100).toFixed(1) : '0.0';
+        return `<div class="matrix-summary-chip"><span class="color-dot" style="background:${getSeriesColor(i).solid}"></span><strong>${escapeHtml(shortLabel(opt.label, 22))}</strong><span>${pct}%</span><span class="matrix-chip-count">${count}</span></div>`;
+    }).join('');
+}
+
+function renderMatrixDimensionChart(wrapper, question, dimension, rows, options) {
+    const datasets = options.map((option, index) => {
+        const color = getSeriesColor(index);
+        return {
+            label: option.label,
+            data: rows.map((row) => {
+                const distribution = (((question.matrix || {})[row.code] || {})[dimension.code]) || {};
+                const total = Object.values(distribution).reduce((sum, value) => sum + Number(value || 0), 0);
+                const optionValue = Number(distribution[option.code] || 0);
+                return total > 0 ? Number(((optionValue * 100) / total).toFixed(1)) : 0;
+            }),
+            backgroundColor: color.fill,
+            borderColor: color.solid,
+            borderWidth: 1,
+            borderRadius: 4,
+        };
+    }).filter((dataset) => dataset.data.some((value) => value > 0));
+
+    if (!datasets.length || !window.Chart) {
+        wrapper.innerHTML = buildEmptyState('Sin datos suficientes para esta dimensión.');
+        return;
+    }
+
+    const adaptiveHeight = Math.max(280, rows.length * 42 + 80);
+    wrapper.style.height = `${adaptiveHeight}px`;
+    wrapper.style.minHeight = `${adaptiveHeight}px`;
+    wrapper.innerHTML = '<canvas></canvas>';
+    const canvas = wrapper.querySelector('canvas');
+
+    dynamicCharts.push(new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: rows.map((row) => shortLabel(row.label, 30)),
+            datasets,
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {boxWidth: 12, padding: 14, font: {size: 11}},
+                },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => rows[items[0].dataIndex]?.label || '',
+                        label: (context) => {
+                            const distribution = (((question.matrix || {})[rows[context.dataIndex]?.code] || {})[dimension.code]) || {};
+                            const count = Number(distribution[options.find(o => o.label === context.dataset.label)?.code] || 0);
+                            return `${context.dataset.label}: ${formatPercentage(context.parsed.x)} (${count})`;
+                        },
+                    },
+                },
+            },
+            scales: {
+                x: {stacked: true, beginAtZero: true, max: 100, ticks: {callback: (v) => `${v}%`}},
+                y: {stacked: true},
+            },
+        },
+    }));
+}
+
 function renderMatrixInsights(data) {
     const panel = document.getElementById('matrixPanel');
     const container = document.getElementById('matrixInsights');
@@ -1689,109 +1838,91 @@ function renderMatrixInsights(data) {
     container.innerHTML = '';
 
     matrixQuestions.forEach((question) => {
+        const rows = Array.isArray(question.matrix_meta.rows) ? question.matrix_meta.rows : [];
+        const dimensions = Array.isArray(question.matrix_meta.dimensions) ? question.matrix_meta.dimensions : [];
+        if (!dimensions.length || !rows.length) return;
+
         const report = document.createElement('article');
         report.className = 'matrix-report';
+
+        const dimensionTabs = dimensions.map((dim, i) =>
+            `<button class="segmented-button ${i === 0 ? 'active' : ''}" type="button" data-dim-idx="${i}">${escapeHtml(shortLabel(dim.label, 24))}</button>`
+        ).join('');
+
+        const viewTabs = `
+            <button class="segmented-button active" type="button" data-matrix-view="chart">Gráfico apilado</button>
+            <button class="segmented-button" type="button" data-matrix-view="heatmap">Tabla de calor</button>
+            <button class="segmented-button" type="button" data-matrix-view="summary">Resumen</button>
+        `;
+
         report.innerHTML = `
             <div class="report-chart-head">
                 <div class="report-meta-row">
                     <span class="chip chip-muted">${escapeHtml(question.section_title)}</span>
                     <span class="chip chip-muted">${question.responses} registros</span>
                     <span class="chip chip-muted">${formatPercentage(question.coverage_percentage)} cobertura</span>
+                    <span class="chip chip-muted">${rows.length} filas &times; ${dimensions.length} dimensiones</span>
                 </div>
                 <strong>${escapeHtml(question.code)}. ${escapeHtml(question.title)}</strong>
-                <p>Comparativo 100% apilado por dimensión para facilitar lectura entre personajes, opciones o filas de matriz.</p>
             </div>
-            <div class="matrix-report-grid"></div>
+            ${dimensions.length > 1 ? `<div class="matrix-dimension-tabs"><span class="question-sort-label">Dimensión:</span><div class="segmented-actions matrix-dim-btns">${dimensionTabs}</div></div>` : ''}
+            <div class="matrix-view-tabs"><span class="question-sort-label">Vista:</span><div class="segmented-actions matrix-view-btns">${viewTabs}</div></div>
+            <div class="matrix-active-content">
+                <div class="matrix-chart-area"><div class="report-canvas-wrap matrix-canvas-wrap"></div></div>
+                <div class="matrix-heatmap-area" style="display:none;"></div>
+                <div class="matrix-summary-area" style="display:none;"></div>
+            </div>
         `;
 
-        const grid = report.querySelector('.matrix-report-grid');
-        const rows = Array.isArray(question.matrix_meta.rows) ? question.matrix_meta.rows : [];
-        const dimensions = Array.isArray(question.matrix_meta.dimensions) ? question.matrix_meta.dimensions : [];
+        container.appendChild(report);
 
-        dimensions.forEach((dimension) => {
-            const options = getMatrixDimensionOptions(question, dimension);
-            const datasets = options.map((option, index) => {
-                const color = getSeriesColor(index);
-                return {
-                    label: option.label,
-                    data: rows.map((row) => {
-                        const distribution = (((question.matrix || {})[row.code] || {})[dimension.code]) || {};
-                        const total = Object.values(distribution).reduce((sum, value) => sum + Number(value || 0), 0);
-                        const optionValue = Number(distribution[option.code] || 0);
-                        return total > 0 ? Number(((optionValue * 100) / total).toFixed(1)) : 0;
-                    }),
-                    backgroundColor: color.fill,
-                    borderColor: color.solid,
-                    borderWidth: 1,
-                };
-            }).filter((dataset) => dataset.data.some((value) => value > 0));
+        let activeDimIdx = 0;
+        let activeView = 'chart';
 
-            const card = document.createElement('article');
-            card.className = 'chart-card report-chart-card';
-            card.innerHTML = `
-                <div class="report-chart-head">
-                    <span class="chip chip-muted">Dimensión</span>
-                    <strong>${escapeHtml(dimension.label)}</strong>
-                    <p>Distribución porcentual comparada por fila de la matriz.</p>
-                </div>
-                <div class="report-canvas-wrap"></div>
-            `;
+        function renderActiveMatrix() {
+            const dim = dimensions[activeDimIdx];
+            const options = getMatrixDimensionOptions(question, dim);
+            const chartArea = report.querySelector('.matrix-chart-area');
+            const heatmapArea = report.querySelector('.matrix-heatmap-area');
+            const summaryArea = report.querySelector('.matrix-summary-area');
 
-            if (!datasets.length || !window.Chart) {
-                card.querySelector('.report-canvas-wrap').innerHTML = buildEmptyState('Sin datos suficientes para esta dimensión.');
-                grid.appendChild(card);
-                return;
+            chartArea.style.display = activeView === 'chart' ? '' : 'none';
+            heatmapArea.style.display = activeView === 'heatmap' ? '' : 'none';
+            summaryArea.style.display = activeView === 'summary' ? '' : 'none';
+
+            if (activeView === 'chart') {
+                const wrap = chartArea.querySelector('.report-canvas-wrap');
+                wrap.style.height = '';
+                wrap.style.minHeight = '';
+                renderMatrixDimensionChart(wrap, question, dim, rows, options);
+            } else if (activeView === 'heatmap') {
+                heatmapArea.innerHTML = buildMatrixHeatmapTable(question, dim, rows, options);
+            } else if (activeView === 'summary') {
+                summaryArea.innerHTML = `
+                    <div class="matrix-summary-header"><strong>${escapeHtml(dim.label)}</strong><span class="chip chip-muted">${options.length} opciones &middot; ${rows.length} filas</span></div>
+                    <div class="matrix-summary-chips">${buildMatrixSummaryCards(question, dim, rows, options)}</div>
+                    ${buildMatrixHeatmapTable(question, dim, rows, options)}
+                `;
             }
-
-            const wrapper = card.querySelector('.report-canvas-wrap');
-            const adaptiveHeight = Math.max(280, rows.length * 40 + 60);
-            wrapper.style.height = `${adaptiveHeight}px`;
-            wrapper.style.minHeight = `${adaptiveHeight}px`;
-            wrapper.innerHTML = '<canvas></canvas>';
-            const canvas = wrapper.querySelector('canvas');
-
-            dynamicCharts.push(new Chart(canvas, {
-                type: 'bar',
-                data: {
-                    labels: rows.map((row) => shortLabel(row.label, 28)),
-                    datasets,
-                },
-                options: {
-                    indexAxis: 'y',
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        tooltip: {
-                            callbacks: {
-                                title: (items) => rows[items[0].dataIndex]?.label || '',
-                                label: (context) => `${context.dataset.label}: ${formatPercentage(context.parsed.x)}`,
-                            },
-                        },
-                    },
-                    scales: {
-                        x: {
-                            stacked: true,
-                            beginAtZero: true,
-                            max: 100,
-                            ticks: {
-                                callback: (value) => `${value}%`,
-                            },
-                        },
-                        y: {
-                            stacked: true,
-                        },
-                    },
-                },
-            }));
-
-            grid.appendChild(card);
-        });
-
-        if (!grid.children.length) {
-            grid.innerHTML = buildEmptyState('No hay suficientes datos para construir comparativos de matriz.');
         }
 
-        container.appendChild(report);
+        report.querySelector('.matrix-dim-btns')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-dim-idx]');
+            if (!btn) return;
+            activeDimIdx = Number(btn.dataset.dimIdx);
+            report.querySelectorAll('.matrix-dim-btns .segmented-button').forEach((b) => b.classList.toggle('active', b === btn));
+            renderActiveMatrix();
+        });
+
+        report.querySelector('.matrix-view-btns').addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-matrix-view]');
+            if (!btn) return;
+            activeView = btn.dataset.matrixView;
+            report.querySelectorAll('.matrix-view-btns .segmented-button').forEach((b) => b.classList.toggle('active', b === btn));
+            renderActiveMatrix();
+        });
+
+        renderActiveMatrix();
     });
 }
 
@@ -1980,6 +2111,14 @@ function bootReportsPage() {
                 b.classList.toggle('active', b === button);
             });
             renderFilteredQuestions();
+        });
+    });
+
+    // Location view toggle
+    document.querySelectorAll('#locationViewButtons .segmented-button').forEach((button) => {
+        button.addEventListener('click', () => {
+            document.querySelectorAll('#locationViewButtons .segmented-button').forEach((b) => b.classList.toggle('active', b === button));
+            toggleLocationView(button.dataset.locView);
         });
     });
 

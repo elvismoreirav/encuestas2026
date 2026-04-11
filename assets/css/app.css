@@ -3195,6 +3195,28 @@ th {
         height: 320px;
         min-height: 320px;
     }
+
+    .matrix-dimension-tabs,
+    .matrix-view-tabs {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .matrix-heatmap-label {
+        min-width: 120px;
+    }
+
+    .location-chart-card {
+        grid-column: auto;
+    }
+
+    .location-table-bar-cell {
+        width: 100px;
+    }
+
+    .matrix-summary-chips {
+        flex-direction: column;
+    }
 }
 
 /* Question filter bar */
@@ -3392,4 +3414,196 @@ th {
     border-radius: 50%;
     margin-right: 8px;
     vertical-align: middle;
+}
+
+/* Matrix redesign */
+.matrix-dimension-tabs,
+.matrix-view-tabs {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.matrix-active-content {
+    min-width: 0;
+}
+
+.matrix-chart-area {
+    min-width: 0;
+}
+
+.matrix-canvas-wrap {
+    height: auto;
+    min-height: 280px;
+}
+
+.matrix-table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 16px;
+    border: 1px solid rgba(30, 77, 57, 0.1);
+}
+
+.matrix-heatmap-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    white-space: nowrap;
+}
+
+.matrix-heatmap-table th,
+.matrix-heatmap-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(30, 77, 57, 0.06);
+}
+
+.matrix-heatmap-th {
+    background: rgba(30, 77, 57, 0.06);
+    font-weight: 700;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-soft);
+    text-align: center;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.matrix-heatmap-corner {
+    text-align: left;
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: rgba(30, 77, 57, 0.06);
+}
+
+.matrix-heatmap-label {
+    font-weight: 600;
+    position: sticky;
+    left: 0;
+    background: rgba(255, 255, 255, 0.96);
+    z-index: 1;
+    white-space: normal;
+    min-width: 160px;
+    max-width: 240px;
+}
+
+.matrix-heatmap-cell {
+    text-align: center;
+    min-width: 90px;
+    transition: background 160ms ease;
+    vertical-align: middle;
+}
+
+.matrix-heatmap-cell strong {
+    display: block;
+    font-size: 0.92rem;
+    line-height: 1.2;
+}
+
+.matrix-cell-count {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--text-soft);
+    margin-top: 1px;
+}
+
+.matrix-heatmap-table tbody tr:hover td {
+    background: rgba(30, 77, 57, 0.06) !important;
+}
+
+.matrix-heatmap-table tfoot th {
+    background: rgba(30, 77, 57, 0.04);
+    font-weight: 700;
+    border-top: 2px solid rgba(30, 77, 57, 0.12);
+    border-bottom: none;
+}
+
+.matrix-summary-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+
+.matrix-summary-header strong {
+    font-size: 1.05rem;
+}
+
+.matrix-summary-chips {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+}
+
+.matrix-summary-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    background: rgba(30, 77, 57, 0.06);
+    font-size: 0.88rem;
+    white-space: nowrap;
+}
+
+.matrix-chip-count {
+    font-size: 0.76rem;
+    color: var(--text-soft);
+    padding-left: 4px;
+    border-left: 1px solid rgba(30, 77, 57, 0.12);
+}
+
+/* Location chart improvements */
+.location-chart-card {
+    grid-column: 1 / -1;
+}
+
+.location-view-tabs {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.location-detail-table {
+    font-size: 0.88rem;
+}
+
+.location-table-rank {
+    width: 36px;
+    text-align: center;
+    color: var(--text-soft);
+    font-weight: 700;
+    font-size: 0.82rem;
+}
+
+.location-table-name {
+    font-weight: 600;
+    white-space: normal;
+    min-width: 140px;
+}
+
+.location-table-bar-cell {
+    width: 200px;
+    padding-top: 14px !important;
+    padding-bottom: 14px !important;
+}
+
+.location-table-bar {
+    height: 8px;
+    background: linear-gradient(90deg, rgba(30, 77, 57, 0.22), rgba(30, 77, 57, 0.38));
+    border-radius: 999px;
+    min-width: 4px;
+    transition: width 300ms ease;
+}
+
+.location-row-selected {
+    background: rgba(30, 77, 57, 0.06);
+}
+
+.location-row-selected td {
+    font-weight: 700;
 }
