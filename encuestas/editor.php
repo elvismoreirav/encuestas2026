@@ -122,12 +122,15 @@ function editor_question_preview_state(array $question): array
         $configuredDimensions = count(array_filter($dimensions, static function (array $dimension): bool {
             return is_array($dimension['options'] ?? null) && $dimension['options'] !== [];
         }));
+        $missingDimensions = count($dimensions) - $configuredDimensions;
 
-        if ($rows === [] || $dimensions === [] || $configuredDimensions === 0) {
+        if ($rows === [] || $dimensions === [] || $configuredDimensions !== count($dimensions)) {
             return [
                 'label' => 'Matriz incompleta',
                 'class' => 'chip chip-warning',
-                'message' => 'Agregue filas, columnas y opciones para revisar esta matriz sin abrir el modal.',
+                'message' => $rows === [] || $dimensions === []
+                    ? 'Agregue filas, columnas y opciones para revisar esta matriz sin abrir el modal.'
+                    : 'Hay ' . $missingDimensions . ' ' . ($missingDimensions === 1 ? 'columna sin opciones configuradas.' : 'columnas sin opciones configuradas.'),
             ];
         }
 
@@ -219,52 +222,97 @@ function editor_render_question_preview(array $question): string
                 <p>Configure filas y columnas para revisar esta pregunta desde el editor.</p>
             </div>
         <?php else: ?>
-            <div class="question-matrix-list editor-preview-matrix">
-                <div class="question-matrix-card">
-                    <div class="question-matrix-dimension">
-                        <header>
-                            <strong>Filas evaluadas</strong>
-                            <small><?= count($rows) ?> registradas</small>
-                        </header>
-                        <div class="question-matrix-dimensions">
-                            <?php foreach (array_slice($rows, 0, 6) as $row): ?>
-                                <span><?= e((string) ($row['label'] ?? $row['code'] ?? 'Fila')) ?></span>
-                            <?php endforeach; ?>
-                            <?php if (count($rows) > 6): ?>
-                                <span>+<?= count($rows) - 6 ?> filas</span>
-                            <?php endif; ?>
-                        </div>
-                    </div>
+            <?php
+            $gridStyle = 'grid-template-columns: 220px repeat(' . count($dimensions) . ', minmax(220px, 1fr));';
+            $incompleteDimensions = array_values(array_filter($dimensions, static function (array $dimension): bool {
+                return !is_array($dimension['options'] ?? null) || $dimension['options'] === [];
+            }));
+            ?>
+            <div class="editor-preview-matrix-shell">
+                <div class="matrix-helper">
+                    <span class="chip chip-muted"><?= count($rows) ?> <?= count($rows) === 1 ? 'fila' : 'filas' ?> configuradas</span>
+                    <span class="chip chip-muted"><?= count($dimensions) ?> <?= count($dimensions) === 1 ? 'columna' : 'columnas' ?> configuradas</span>
+                    <span class="chip <?= $incompleteDimensions === [] ? 'chip-muted' : 'chip-warning' ?>">
+                        <?= $incompleteDimensions === [] ? 'Todas las columnas tienen respuestas' : count($incompleteDimensions) . ' columnas sin respuestas' ?>
+                    </span>
                 </div>
-                <?php foreach ($dimensions as $dimension): ?>
-                    <?php
-                    $dimensionOptions = is_array($dimension['options'] ?? null) ? $dimension['options'] : [];
-                    $dimensionLabel = trim((string) ($dimension['label'] ?? $dimension['code'] ?? 'Dimensión'));
-                    ?>
-                    <div class="question-matrix-card">
-                        <div class="question-matrix-dimension">
-                            <header>
-                                <strong><?= e($dimensionLabel !== '' ? $dimensionLabel : 'Dimensión') ?></strong>
-                                <small><?= count($dimensionOptions) ?> <?= count($dimensionOptions) === 1 ? 'opción' : 'opciones' ?></small>
-                            </header>
-                            <?php if ($dimensionOptions === []): ?>
-                                <div class="editor-preview-empty editor-preview-empty-compact">
-                                    <strong>Sin opciones</strong>
-                                    <p>Agregue respuestas posibles para esta dimensión.</p>
+                <?php if ($incompleteDimensions !== []): ?>
+                    <div class="editor-preview-empty editor-preview-empty-compact">
+                        <strong>Columnas pendientes de configurar</strong>
+                        <p><?= e(implode(', ', array_map(static function (array $dimension): string {
+                            return trim((string) ($dimension['label'] ?? $dimension['code'] ?? 'Dimensión'));
+                        }, $incompleteDimensions))) ?></p>
+                    </div>
+                <?php endif; ?>
+                <div class="matrix-shell">
+                    <div class="matrix-head-grid" style="<?= e($gridStyle) ?>">
+                        <div class="matrix-head">
+                            <div class="editor-preview-matrix-head">
+                                <strong>Filas / elementos</strong>
+                                <small>Se muestra cada fila configurada</small>
+                            </div>
+                        </div>
+                        <?php foreach ($dimensions as $dimension): ?>
+                            <?php
+                            $dimensionOptions = is_array($dimension['options'] ?? null) ? $dimension['options'] : [];
+                            $dimensionLabel = trim((string) ($dimension['label'] ?? $dimension['code'] ?? 'Dimensión'));
+                            $dimensionCode = trim((string) ($dimension['code'] ?? ''));
+                            ?>
+                            <div class="matrix-head">
+                                <div class="editor-preview-matrix-head">
+                                    <strong><?= e($dimensionLabel !== '' ? $dimensionLabel : 'Dimensión') ?></strong>
+                                    <small>
+                                        <?= e($dimensionCode !== '' ? 'Código ' . $dimensionCode . ' · ' : '') ?>
+                                        <?= count($dimensionOptions) ?> <?= count($dimensionOptions) === 1 ? 'opción' : 'opciones' ?>
+                                    </small>
                                 </div>
-                            <?php else: ?>
-                                <div class="question-matrix-dimensions">
-                                    <?php foreach (array_slice($dimensionOptions, 0, 5) as $option): ?>
-                                        <span><?= e((string) ($option['label'] ?? $option['code'] ?? 'Sin etiqueta')) ?></span>
-                                    <?php endforeach; ?>
-                                    <?php if (count($dimensionOptions) > 5): ?>
-                                        <span>+<?= count($dimensionOptions) - 5 ?> opciones</span>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                    <div class="matrix-rows">
+                        <?php foreach ($rows as $rowIndex => $row): ?>
+                            <?php
+                            $rowLabel = trim((string) ($row['label'] ?? $row['code'] ?? 'Fila'));
+                            $rowCode = trim((string) ($row['code'] ?? ''));
+                            ?>
+                            <div class="matrix-table-row" style="<?= e($gridStyle) ?>">
+                                <div class="matrix-candidate">
+                                    <span class="matrix-order"><?= str_pad((string) ($rowIndex + 1), 2, '0', STR_PAD_LEFT) ?></span>
+                                    <strong><?= e($rowLabel !== '' ? $rowLabel : 'Fila') ?></strong>
+                                    <?php if ($rowCode !== ''): ?>
+                                        <small class="editor-preview-matrix-code">Código <?= e($rowCode) ?></small>
                                     <?php endif; ?>
                                 </div>
-                            <?php endif; ?>
-                        </div>
+                                <?php foreach ($dimensions as $dimension): ?>
+                                    <?php
+                                    $dimensionOptions = is_array($dimension['options'] ?? null) ? $dimension['options'] : [];
+                                    $dimensionLabel = trim((string) ($dimension['label'] ?? $dimension['code'] ?? 'Dimensión'));
+                                    ?>
+                                    <div class="matrix-cell<?= $dimensionOptions === [] ? ' is-missing' : '' ?>">
+                                        <span class="matrix-cell-label"><?= e($dimensionLabel !== '' ? $dimensionLabel : 'Dimensión') ?></span>
+                                        <?php if ($dimensionOptions === []): ?>
+                                            <span class="matrix-cell-error">Sin opciones configuradas en esta columna.</span>
+                                        <?php else: ?>
+                                            <div class="matrix-options">
+                                                <?php foreach ($dimensionOptions as $optionIndex => $option): ?>
+                                                    <?php
+                                                    $optionCode = trim((string) ($option['code'] ?? ''));
+                                                    $optionLabel = trim((string) ($option['label'] ?? ''));
+                                                    $optionBadge = $optionCode !== '' ? $optionCode : chr(65 + ($optionIndex % 26));
+                                                    ?>
+                                                    <div class="matrix-option editor-preview-matrix-option">
+                                                        <span class="matrix-option-badge"><?= e($optionBadge) ?></span>
+                                                        <span class="matrix-option-label"><?= e($optionLabel !== '' ? $optionLabel : ($optionCode !== '' ? $optionCode : 'Sin etiqueta')) ?></span>
+                                                    </div>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endforeach; ?>
                     </div>
-                <?php endforeach; ?>
+                </div>
             </div>
         <?php endif; ?>
     <?php else: ?>
