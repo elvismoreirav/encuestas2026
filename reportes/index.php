@@ -167,8 +167,66 @@ require TEMPLATES_PATH . '/admin_header.php';
             <p>Distribuciones comparables por pregunta cerrada, con porcentajes y cobertura.</p>
         </div>
     </div>
+    <div class="question-filter-bar">
+        <div class="question-filter-row">
+            <div class="field question-filter-field">
+                <label>Buscar pregunta</label>
+                <input type="text" id="questionSearchInput" placeholder="Código o texto de la pregunta...">
+            </div>
+            <div class="field question-filter-field">
+                <label>Sección</label>
+                <select id="questionSectionFilter">
+                    <option value="all">Todas las secciones</option>
+                </select>
+            </div>
+            <div class="field question-filter-field">
+                <label>Tipo</label>
+                <select id="questionTypeFilter">
+                    <option value="all">Todos los tipos</option>
+                    <option value="choice">Opción cerrada</option>
+                    <option value="matrix">Matriz</option>
+                    <option value="text">Texto abierto</option>
+                </select>
+            </div>
+        </div>
+        <div class="question-sort-row">
+            <span class="question-sort-label">Ordenar por:</span>
+            <div class="segmented-actions" id="questionSortButtons">
+                <button class="segmented-button active" type="button" data-sort="order">Orden original</button>
+                <button class="segmented-button" type="button" data-sort="responses">Más respuestas</button>
+                <button class="segmented-button" type="button" data-sort="coverage">Mayor cobertura</button>
+                <button class="segmented-button" type="button" data-sort="code">Código A-Z</button>
+            </div>
+        </div>
+        <div class="question-filter-summary" id="questionFilterSummary"></div>
+    </div>
     <div id="questionCharts" class="report-chart-grid"></div>
 </section>
+
+<div class="question-detail-overlay" id="questionDetailOverlay" style="display:none;">
+    <div class="question-detail-modal">
+        <div class="question-detail-header">
+            <div>
+                <h2 id="questionDetailTitle"></h2>
+                <p id="questionDetailSubtitle"></p>
+            </div>
+            <button class="btn btn-secondary" type="button" id="closeQuestionDetail">Cerrar</button>
+        </div>
+        <div class="question-detail-tabs">
+            <button class="segmented-button active" type="button" data-tab="bar">Barras</button>
+            <button class="segmented-button" type="button" data-tab="pie">Circular</button>
+            <button class="segmented-button" type="button" data-tab="polar">Polar</button>
+            <button class="segmented-button" type="button" data-tab="table">Tabla</button>
+        </div>
+        <div class="question-detail-body">
+            <div class="question-detail-meta" id="questionDetailMeta"></div>
+            <div class="question-detail-chart-wrap">
+                <canvas id="questionDetailCanvas"></canvas>
+            </div>
+            <div id="questionDetailTable" style="display:none;"></div>
+        </div>
+    </div>
+</div>
 
 <section class="panel" id="matrixPanel" style="display:none;">
     <div class="panel-header">
@@ -199,6 +257,9 @@ let dynamicCharts = [];
 let territorialCountTable;
 let questionCountTable;
 let lastStatsPayload = null;
+let questionDetailChart = null;
+let currentQuestionSort = 'order';
+let allQuestionData = [];
 
 const REPORT_PALETTE = [
     {solid: '#1e4d39', fill: 'rgba(30, 77, 57, 0.22)'},
@@ -1241,12 +1302,83 @@ function renderOptionPills(options, limit = 3) {
     `).join('');
 }
 
+function populateQuestionFilters(data) {
+    const sectionSelect = document.getElementById('questionSectionFilter');
+    const sections = data.section_stats || [];
+    sectionSelect.innerHTML = '<option value="all">Todas las secciones</option>';
+    sections.forEach((section) => {
+        sectionSelect.innerHTML += `<option value="${escapeHtml(section.title)}">${escapeHtml(section.title)}</option>`;
+    });
+}
+
+function collectAllQuestions(data) {
+    const questions = Object.values(data.question_stats || {});
+    let index = 0;
+    return questions.map((q) => ({...q, _originalIndex: index++}));
+}
+
+function filterAndSortQuestions(questions) {
+    const search = (document.getElementById('questionSearchInput')?.value || '').toLowerCase().trim();
+    const section = document.getElementById('questionSectionFilter')?.value || 'all';
+    const typeFilter = document.getElementById('questionTypeFilter')?.value || 'all';
+
+    let filtered = questions.filter((q) => {
+        if (typeFilter !== 'all' && q.type !== typeFilter) return false;
+        if (section !== 'all' && q.section_title !== section) return false;
+        if (search) {
+            const haystack = `${q.code} ${q.title}`.toLowerCase();
+            if (!haystack.includes(search)) return false;
+        }
+        return true;
+    });
+
+    switch (currentQuestionSort) {
+        case 'responses':
+            filtered.sort((a, b) => (b.responses || 0) - (a.responses || 0));
+            break;
+        case 'coverage':
+            filtered.sort((a, b) => (b.coverage_percentage || 0) - (a.coverage_percentage || 0));
+            break;
+        case 'code':
+            filtered.sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''), 'es'));
+            break;
+        default:
+            filtered.sort((a, b) => a._originalIndex - b._originalIndex);
+    }
+
+    return filtered;
+}
+
+function updateQuestionFilterSummary(shown, total) {
+    const el = document.getElementById('questionFilterSummary');
+    if (shown === total) {
+        el.textContent = `${total} preguntas disponibles`;
+    } else {
+        el.textContent = `Mostrando ${shown} de ${total} preguntas`;
+    }
+}
+
+function renderFilteredQuestions() {
+    const filtered = filterAndSortQuestions(allQuestionData);
+    updateQuestionFilterSummary(filtered.length, allQuestionData.length);
+    renderQuestionChartsFromList(filtered);
+}
+
 function renderQuestionCharts(data) {
+    populateQuestionFilters(data);
+    allQuestionData = collectAllQuestions(data);
+    renderFilteredQuestions();
+}
+
+function renderQuestionChartsFromList(questions) {
     const container = document.getElementById('questionCharts');
-    const choiceQuestions = Object.values(data.question_stats || {}).filter((question) => question.type === 'choice' && Array.isArray(question.options) && question.options.length);
+    dynamicCharts.forEach((chart) => chart.destroy());
+    dynamicCharts = [];
+
+    const choiceQuestions = questions.filter((question) => question.type === 'choice' && Array.isArray(question.options) && question.options.length);
 
     if (!choiceQuestions.length) {
-        container.innerHTML = buildEmptyState('No hay preguntas cerradas con respuestas válidas para construir gráficos.');
+        container.innerHTML = buildEmptyState('No hay preguntas cerradas con respuestas válidas para los filtros seleccionados.');
         return;
     }
 
@@ -1254,7 +1386,7 @@ function renderQuestionCharts(data) {
 
     choiceQuestions.forEach((question) => {
         const article = document.createElement('article');
-        article.className = 'chart-card report-chart-card';
+        article.className = 'chart-card report-chart-card question-chart-interactive';
         article.innerHTML = `
             <div class="report-chart-head">
                 <div class="report-meta-row">
@@ -1268,8 +1400,16 @@ function renderQuestionCharts(data) {
             <div class="report-canvas-wrap">
                 <canvas></canvas>
             </div>
-            <div class="report-chart-footer">${renderOptionPills(question.options)}</div>
+            <div class="report-chart-footer">
+                ${renderOptionPills(question.options)}
+                <button class="btn btn-sm btn-outline question-detail-btn" type="button" title="Ver detalle ampliado">Detalle</button>
+            </div>
         `;
+
+        article.querySelector('.question-detail-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            openQuestionDetail(question);
+        });
 
         container.appendChild(article);
 
@@ -1280,6 +1420,12 @@ function renderQuestionCharts(data) {
 
         const chartCanvas = article.querySelector('canvas');
         const useHorizontal = question.options.length > 4;
+        if (useHorizontal) {
+            const adaptiveHeight = Math.max(280, question.options.length * 36 + 60);
+            const wrap = article.querySelector('.report-canvas-wrap');
+            wrap.style.height = `${adaptiveHeight}px`;
+            wrap.style.minHeight = `${adaptiveHeight}px`;
+        }
         const colors = question.options.map((_, index) => getSeriesColor(index));
         const dataValues = question.options.map((option) => Number(option.percentage || 0));
 
@@ -1324,6 +1470,190 @@ function renderQuestionCharts(data) {
             },
         }));
     });
+}
+
+function openQuestionDetail(question) {
+    const overlay = document.getElementById('questionDetailOverlay');
+    const title = document.getElementById('questionDetailTitle');
+    const subtitle = document.getElementById('questionDetailSubtitle');
+    const meta = document.getElementById('questionDetailMeta');
+
+    title.textContent = `${question.code}. ${question.title}`;
+    subtitle.textContent = `${question.section_title} · ${question.responses} respuestas · ${formatPercentage(question.coverage_percentage)} cobertura`;
+    meta.innerHTML = `
+        <div class="report-meta-row">
+            <span class="chip chip-muted">${escapeHtml(question.section_title)}</span>
+            <span class="chip chip-muted">${question.responses} respuestas</span>
+            <span class="chip chip-muted">${formatPercentage(question.coverage_percentage)} cobertura</span>
+        </div>
+    `;
+
+    overlay.style.display = '';
+    overlay.dataset.questionCode = question.code;
+    document.body.style.overflow = 'hidden';
+
+    const tabs = overlay.querySelectorAll('.question-detail-tabs .segmented-button');
+    tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.tab === 'bar'));
+
+    renderQuestionDetailChart(question, 'bar');
+
+    const tabHandler = (e) => {
+        const tab = e.target.closest('[data-tab]');
+        if (!tab) return;
+        tabs.forEach((t) => t.classList.toggle('active', t === tab));
+        renderQuestionDetailChart(question, tab.dataset.tab);
+    };
+    overlay.querySelector('.question-detail-tabs').onclick = tabHandler;
+}
+
+function closeQuestionDetail() {
+    const overlay = document.getElementById('questionDetailOverlay');
+    overlay.style.display = 'none';
+    document.body.style.overflow = '';
+    if (questionDetailChart) {
+        questionDetailChart.destroy();
+        questionDetailChart = null;
+    }
+    document.getElementById('questionDetailTable').style.display = 'none';
+}
+
+function renderQuestionDetailChart(question, chartType) {
+    if (questionDetailChart) {
+        questionDetailChart.destroy();
+        questionDetailChart = null;
+    }
+
+    const canvasWrap = document.querySelector('.question-detail-chart-wrap');
+    const tableContainer = document.getElementById('questionDetailTable');
+    tableContainer.style.display = 'none';
+    canvasWrap.style.display = '';
+
+    if (chartType === 'table') {
+        canvasWrap.style.display = 'none';
+        tableContainer.style.display = '';
+        tableContainer.innerHTML = renderQuestionTable(question);
+        return;
+    }
+
+    canvasWrap.innerHTML = '<canvas id="questionDetailCanvas"></canvas>';
+    const canvas = document.getElementById('questionDetailCanvas');
+    if (!window.Chart || !question.options?.length) return;
+
+    const colors = question.options.map((_, i) => getSeriesColor(i));
+    const labels = question.options.map((o) => o.label);
+    const values = question.options.map((o) => Number(o.percentage || 0));
+    const counts = question.options.map((o) => Number(o.count || 0));
+
+    if (chartType === 'bar') {
+        const useHorizontal = question.options.length > 4;
+        questionDetailChart = new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels: labels.map((l) => shortLabel(l, useHorizontal ? 50 : 24)),
+                datasets: [{
+                    data: values,
+                    backgroundColor: colors.map((c) => c.fill),
+                    borderColor: colors.map((c) => c.solid),
+                    borderWidth: 1,
+                    borderRadius: 12,
+                }],
+            },
+            options: {
+                indexAxis: useHorizontal ? 'y' : 'x',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {display: false},
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => {
+                                const idx = ctx.dataIndex;
+                                const val = useHorizontal ? ctx.parsed.x : ctx.parsed.y;
+                                return `${labels[idx]}: ${formatPercentage(val)} (${counts[idx]})`;
+                            },
+                        },
+                    },
+                },
+                scales: {
+                    [useHorizontal ? 'x' : 'y']: {beginAtZero: true, max: 100, ticks: {callback: (v) => `${v}%`}},
+                },
+            },
+        });
+    } else if (chartType === 'pie') {
+        questionDetailChart = new Chart(canvas, {
+            type: 'doughnut',
+            data: {
+                labels,
+                datasets: [{
+                    data: counts,
+                    backgroundColor: colors.map((c) => c.fill),
+                    borderColor: colors.map((c) => c.solid),
+                    borderWidth: 2,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {position: 'right', labels: {boxWidth: 14, padding: 12}},
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => `${labels[ctx.dataIndex]}: ${formatPercentage(values[ctx.dataIndex])} (${counts[ctx.dataIndex]})`,
+                        },
+                    },
+                },
+            },
+        });
+    } else if (chartType === 'polar') {
+        questionDetailChart = new Chart(canvas, {
+            type: 'polarArea',
+            data: {
+                labels,
+                datasets: [{
+                    data: counts,
+                    backgroundColor: colors.map((c) => c.fill),
+                    borderColor: colors.map((c) => c.solid),
+                    borderWidth: 2,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {position: 'right', labels: {boxWidth: 14, padding: 12}},
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => `${labels[ctx.dataIndex]}: ${formatPercentage(values[ctx.dataIndex])} (${counts[ctx.dataIndex]})`,
+                        },
+                    },
+                },
+            },
+        });
+    }
+}
+
+function renderQuestionTable(question) {
+    if (!question.options?.length) return buildEmptyState('Sin opciones para mostrar.');
+    const rows = question.options.map((opt, i) => `
+        <tr>
+            <td><span class="color-dot" style="background:${getSeriesColor(i).solid}"></span>${escapeHtml(opt.label)}</td>
+            <td class="text-right">${Number(opt.count || 0)}</td>
+            <td class="text-right">${formatPercentage(opt.percentage)}</td>
+        </tr>
+    `).join('');
+
+    const totalCount = question.options.reduce((sum, o) => sum + Number(o.count || 0), 0);
+    return `
+        <table class="question-detail-table">
+            <thead>
+                <tr><th>Opción</th><th class="text-right">Respuestas</th><th class="text-right">Porcentaje</th></tr>
+            </thead>
+            <tbody>${rows}</tbody>
+            <tfoot>
+                <tr><th>Total</th><th class="text-right">${totalCount}</th><th class="text-right">100%</th></tr>
+            </tfoot>
+        </table>
+    `;
 }
 
 function getMatrixDimensionOptions(detail, dimension) {
@@ -1414,6 +1744,9 @@ function renderMatrixInsights(data) {
             }
 
             const wrapper = card.querySelector('.report-canvas-wrap');
+            const adaptiveHeight = Math.max(280, rows.length * 40 + 60);
+            wrapper.style.height = `${adaptiveHeight}px`;
+            wrapper.style.minHeight = `${adaptiveHeight}px`;
             wrapper.innerHTML = '<canvas></canvas>';
             const canvas = wrapper.querySelector('canvas');
 
@@ -1630,6 +1963,34 @@ function bootReportsPage() {
 
     document.getElementById('stats_from').addEventListener('change', () => setActiveQuickRange(null));
     document.getElementById('stats_to').addEventListener('change', () => setActiveQuickRange(null));
+
+    // Question filter/sort bindings
+    let questionFilterDebounce = null;
+    document.getElementById('questionSearchInput').addEventListener('input', () => {
+        clearTimeout(questionFilterDebounce);
+        questionFilterDebounce = setTimeout(renderFilteredQuestions, 250);
+    });
+    document.getElementById('questionSectionFilter').addEventListener('change', renderFilteredQuestions);
+    document.getElementById('questionTypeFilter').addEventListener('change', renderFilteredQuestions);
+
+    document.querySelectorAll('#questionSortButtons .segmented-button').forEach((button) => {
+        button.addEventListener('click', () => {
+            currentQuestionSort = button.dataset.sort || 'order';
+            document.querySelectorAll('#questionSortButtons .segmented-button').forEach((b) => {
+                b.classList.toggle('active', b === button);
+            });
+            renderFilteredQuestions();
+        });
+    });
+
+    // Detail overlay
+    document.getElementById('closeQuestionDetail').addEventListener('click', closeQuestionDetail);
+    document.getElementById('questionDetailOverlay').addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) closeQuestionDetail();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeQuestionDetail();
+    });
 
     setActiveReportScope(document.getElementById('stats_report_scope')?.value || 'primary');
     resetLocationFilterControl();
