@@ -131,7 +131,7 @@ require TEMPLATES_PATH . '/admin_header.php';
     <div class="panel-header">
         <div>
             <h2>Matriz dinámica de conteo</h2>
-            <p>Vista tabular para seguir el avance por territorio y por pregunta usando el mismo filtro del reporte.</p>
+            <p>Vista tabular para seguir el avance por territorio usando el mismo filtro del reporte.</p>
         </div>
     </div>
     <div class="report-matrix-layout">
@@ -144,17 +144,6 @@ require TEMPLATES_PATH . '/admin_header.php';
             <div class="table-shell">
                 <div id="territorialCountTable"></div>
                 <div id="territorialCountFallback" class="table-wrap" style="display:none;"></div>
-            </div>
-        </article>
-        <article class="chart-card report-chart-card report-table-card">
-            <div class="report-chart-head">
-                <span class="chip chip-muted">Formulario</span>
-                <strong>Conteo por pregunta</strong>
-                <p id="questionCountDescription">Lectura operativa del instrumento según el cantón seleccionado o la vista total.</p>
-            </div>
-            <div class="table-shell">
-                <div id="questionCountTable"></div>
-                <div id="questionCountFallback" class="table-wrap" style="display:none;"></div>
             </div>
         </article>
     </div>
@@ -255,7 +244,6 @@ let coverageChart;
 let sectionChart;
 let dynamicCharts = [];
 let territorialCountTable;
-let questionCountTable;
 let lastStatsPayload = null;
 let questionDetailChart = null;
 let currentQuestionSort = 'order';
@@ -422,26 +410,6 @@ function formatCount(value) {
     return Number(value || 0).toLocaleString('es-EC');
 }
 
-function questionTypeLabel(type = '') {
-    const normalized = String(type || '').trim();
-    if (normalized === 'single_choice') {
-        return 'Selección única';
-    }
-    if (normalized === 'multiple_choice') {
-        return 'Selección múltiple';
-    }
-    if (normalized === 'rating') {
-        return 'Escala';
-    }
-    if (normalized === 'text' || normalized === 'textarea') {
-        return 'Texto abierto';
-    }
-    if (normalized === 'matrix') {
-        return 'Matriz';
-    }
-    return normalized ? normalized.replace(/_/g, ' ') : 'Sin tipo';
-}
-
 function buildFallbackCountMatrix(data) {
     const locationFilter = data.location_filter || {};
     const locationOptions = Array.isArray(locationFilter.options) ? locationFilter.options : [];
@@ -464,73 +432,6 @@ function buildFallbackCountMatrix(data) {
             };
         });
 
-    const questionStats = data.question_stats || {};
-    const coverageRows = Array.isArray(data.coverage) ? data.coverage : [];
-    const questionRows = coverageRows.map((item, index) => {
-        const stat = questionStats[item.code] || null;
-        let summary = 'Sin respuestas dentro del filtro actual.';
-        let highlightLabel = null;
-        let highlightCount = null;
-        let highlightPercentage = null;
-        let optionBreakdown = [];
-        let otherOptions = [];
-        let otherOptionsSummary = 'Sin lectura adicional.';
-
-        if (stat?.type === 'choice' && Array.isArray(stat.options) && stat.options.length) {
-            optionBreakdown = stat.options.map((option) => ({
-                label: String(option.label || ''),
-                count: Number(option.count || 0),
-                percentage: Number(option.percentage || 0),
-            })).filter((option) => option.label);
-            otherOptions = optionBreakdown.slice(1);
-            otherOptionsSummary = otherOptions.length
-                ? otherOptions.map((option) => `${option.label} · ${formatPercentage(option.percentage)} (${formatCount(option.count)})`).join(' | ')
-                : 'Sin otras respuestas relevantes.';
-            const topOption = stat.options[0];
-            highlightLabel = topOption.label || null;
-            highlightCount = Number(topOption.count || 0);
-            highlightPercentage = Number(topOption.percentage || 0);
-            summary = `${highlightLabel || 'Opción principal'} lidera con ${formatPercentage(highlightPercentage)} (${highlightCount}).`;
-        } else if (stat?.type === 'matrix') {
-            const rowCount = Array.isArray(stat.matrix_meta?.rows) ? stat.matrix_meta.rows.length : 0;
-            const dimensionCount = Array.isArray(stat.matrix_meta?.dimensions) ? stat.matrix_meta.dimensions.length : 0;
-            summary = Number(item.responses || 0) > 0
-                ? `${rowCount} fila(s) y ${dimensionCount} dimensión(es) con actividad.`
-                : summary;
-        } else if (stat?.type === 'text') {
-            const keywordCount = Array.isArray(stat.keywords) ? stat.keywords.length : 0;
-            const sampleCount = Array.isArray(stat.samples) ? stat.samples.length : 0;
-            summary = Number(item.responses || 0) > 0
-                ? (keywordCount > 0
-                    ? `${keywordCount} palabra(s) clave y ${sampleCount} muestra(s) destacadas.`
-                    : `${Number(item.responses || 0)} respuesta(s) abiertas registradas.`)
-                : summary;
-            if (keywordCount > 0) {
-                highlightLabel = stat.keywords[0]?.word || null;
-                highlightCount = Number(stat.keywords[0]?.count || 0);
-            }
-        }
-
-        return {
-            position: index + 1,
-            code: String(item.code || ''),
-            title: String(item.title || ''),
-            section_title: String(item.section_title || 'Sin sección'),
-            type: String(item.type || ''),
-            type_label: questionTypeLabel(item.type || ''),
-            responses: Number(item.responses || 0),
-            coverage_percentage: Number(item.coverage_percentage || 0),
-            summary,
-            highlight_label: highlightLabel,
-            highlight_count: highlightCount,
-            highlight_percentage: highlightPercentage,
-            option_breakdown: optionBreakdown,
-            other_options: otherOptions,
-            other_options_summary: otherOptionsSummary,
-            has_activity: Number(item.responses || 0) > 0,
-        };
-    });
-
     return {
         territorial: {
             enabled: !!locationFilter.enabled,
@@ -542,12 +443,6 @@ function buildFallbackCountMatrix(data) {
             rows: selectedValue === 'all' ? territorialRows : territorialRows.filter((row) => row.is_selected),
             all_rows: territorialRows,
         },
-        questions: {
-            filtered_responses: Number(data.summary?.responses || 0),
-            total_questions: questionRows.length,
-            answered_questions: questionRows.filter((row) => row.responses > 0).length,
-            rows: questionRows,
-        },
     };
 }
 
@@ -557,31 +452,18 @@ function getCountMatrix(data) {
 
 function destroyCountTables() {
     territorialCountTable?.destroy();
-    questionCountTable?.destroy();
     territorialCountTable = null;
-    questionCountTable = null;
 
     const territorialContainer = document.getElementById('territorialCountTable');
-    const questionContainer = document.getElementById('questionCountTable');
     const territorialFallback = document.getElementById('territorialCountFallback');
-    const questionFallback = document.getElementById('questionCountFallback');
 
     if (territorialContainer) {
         territorialContainer.innerHTML = '';
     }
 
-    if (questionContainer) {
-        questionContainer.innerHTML = '';
-    }
-
     if (territorialFallback) {
         territorialFallback.innerHTML = '';
         territorialFallback.style.display = 'none';
-    }
-
-    if (questionFallback) {
-        questionFallback.innerHTML = '';
-        questionFallback.style.display = 'none';
     }
 }
 
@@ -599,61 +481,6 @@ function territoryStatusClass(row) {
     }
 
     return Number(row?.count || 0) > 0 ? 'count-status-neutral' : 'count-status-muted';
-}
-
-function buildQuestionHighlight(row) {
-    if (row?.highlight_label && row?.highlight_percentage !== null && row?.highlight_percentage !== undefined) {
-        return `${row.highlight_label} · ${formatPercentage(row.highlight_percentage)} (${formatCount(row.highlight_count)})`;
-    }
-
-    if (row?.highlight_label && row?.highlight_count !== null && row?.highlight_count !== undefined) {
-        return `${row.highlight_label} · ${formatCount(row.highlight_count)}`;
-    }
-
-    return row?.summary || 'Sin lectura rápida.';
-}
-
-function getQuestionOtherOptions(row) {
-    if (Array.isArray(row?.other_options) && row.other_options.length) {
-        return row.other_options;
-    }
-
-    if (Array.isArray(row?.option_breakdown) && row.option_breakdown.length > 1) {
-        return row.option_breakdown.slice(1);
-    }
-
-    return [];
-}
-
-function buildQuestionOtherAnswersSummary(row) {
-    if (row?.other_options_summary) {
-        return row.other_options_summary;
-    }
-
-    const options = getQuestionOtherOptions(row);
-    if (!options.length) {
-        return row?.option_breakdown?.length ? 'Sin otras respuestas relevantes.' : 'No aplica';
-    }
-
-    return options.map((option) => `${option.label} · ${formatPercentage(option.percentage)} (${formatCount(option.count)})`).join(' | ');
-}
-
-function renderQuestionOtherAnswersHtml(row) {
-    const options = getQuestionOtherOptions(row);
-    if (!options.length) {
-        return `<span class="report-table-muted">${escapeHtml(buildQuestionOtherAnswersSummary(row))}</span>`;
-    }
-
-    return `
-        <div class="report-breakdown-list">
-            ${options.map((option) => `
-                <span class="report-breakdown-pill">
-                    <strong>${escapeHtml(option.label || '')}</strong>
-                    <span>${escapeHtml(formatPercentage(option.percentage))} (${escapeHtml(formatCount(option.count))})</span>
-                </span>
-            `).join('')}
-        </div>
-    `;
 }
 
 function renderTerritorialCountFallback(matrix) {
@@ -697,56 +524,6 @@ function renderTerritorialCountFallback(matrix) {
                         <td>${escapeHtml(formatDateTime(row.first_submission_at))}</td>
                         <td>${escapeHtml(formatDateTime(row.last_submission_at))}</td>
                         <td><span class="count-status ${territoryStatusClass(row)}">${escapeHtml(territoryStatusLabel(row))}</span></td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
-    `;
-}
-
-function renderQuestionCountFallback(matrix) {
-    const fallback = document.getElementById('questionCountFallback');
-    if (!fallback) {
-        return;
-    }
-
-    const rows = Array.isArray(matrix?.rows) ? matrix.rows : [];
-    if (!rows.length) {
-        fallback.style.display = 'block';
-        fallback.innerHTML = buildEmptyState('No hay preguntas disponibles para construir el conteo operativo.');
-        return;
-    }
-
-    fallback.style.display = 'block';
-    fallback.innerHTML = `
-        <table>
-            <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Pregunta</th>
-                    <th>Sección</th>
-                    <th>Tipo</th>
-                    <th>Resp.</th>
-                    <th>Cobertura</th>
-                    <th>Lectura rápida</th>
-                    <th>Otras respuestas</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${rows.map((row) => `
-                    <tr>
-                        <td>${formatCount(row.position)}</td>
-                        <td>
-                            <div class="report-table-title">
-                                <strong>${escapeHtml(row.code)}. ${escapeHtml(row.title)}</strong>
-                            </div>
-                        </td>
-                        <td>${escapeHtml(row.section_title)}</td>
-                        <td>${escapeHtml(row.type_label)}</td>
-                        <td>${formatCount(row.responses)}</td>
-                        <td>${formatPercentage(row.coverage_percentage)}</td>
-                        <td>${escapeHtml(buildQuestionHighlight(row))}</td>
-                        <td>${renderQuestionOtherAnswersHtml(row)}</td>
                     </tr>
                 `).join('')}
             </tbody>
@@ -842,102 +619,10 @@ function renderTerritorialCountTable(matrix) {
     });
 }
 
-function renderQuestionCountTable(matrix) {
-    const description = document.getElementById('questionCountDescription');
-    const container = document.getElementById('questionCountTable');
-
-    if (description) {
-        description.textContent = matrix?.filtered_responses > 0
-            ? `${formatCount(matrix.answered_questions)} de ${formatCount(matrix.total_questions)} preguntas tienen respuestas en el filtro actual.`
-            : 'Todavía no existen respuestas suficientes para construir el conteo operativo.';
-    }
-
-    if (!window.Tabulator) {
-        renderQuestionCountFallback(matrix);
-        return;
-    }
-
-    const rows = Array.isArray(matrix?.rows) ? matrix.rows : [];
-    if (!rows.length) {
-        renderQuestionCountFallback(matrix);
-        return;
-    }
-
-    questionCountTable = new Tabulator(container, {
-        data: rows,
-        layout: 'fitColumns',
-        responsiveLayout: 'collapse',
-        placeholder: 'No hay preguntas disponibles para construir el conteo operativo.',
-        initialSort: [{column: 'position', dir: 'asc'}],
-        columns: [
-            {
-                title: '#',
-                field: 'position',
-                width: 72,
-                hozAlign: 'center',
-                sorter: 'number',
-            },
-            {
-                title: 'Pregunta',
-                field: 'title',
-                minWidth: 280,
-                formatter: (cell) => {
-                    const row = cell.getRow().getData();
-                    return `
-                        <div class="report-table-title">
-                            <strong>${escapeHtml(row.code)}. ${escapeHtml(cell.getValue())}</strong>
-                            <small>${escapeHtml(row.summary || '')}</small>
-                        </div>
-                    `;
-                },
-            },
-            {
-                title: 'Sección',
-                field: 'section_title',
-                minWidth: 180,
-            },
-            {
-                title: 'Tipo',
-                field: 'type_label',
-                minWidth: 150,
-            },
-            {
-                title: 'Resp.',
-                field: 'responses',
-                width: 96,
-                hozAlign: 'center',
-                sorter: 'number',
-                formatter: (cell) => `<strong>${formatCount(cell.getValue())}</strong>`,
-            },
-            {
-                title: 'Cobertura',
-                field: 'coverage_percentage',
-                minWidth: 110,
-                hozAlign: 'center',
-                sorter: 'number',
-                formatter: (cell) => formatPercentage(cell.getValue()),
-            },
-            {
-                title: 'Lectura rápida',
-                field: 'summary',
-                minWidth: 260,
-                formatter: (cell) => escapeHtml(buildQuestionHighlight(cell.getRow().getData())),
-            },
-            {
-                title: 'Otras respuestas',
-                field: 'other_options_summary',
-                minWidth: 320,
-                formatter: (cell) => renderQuestionOtherAnswersHtml(cell.getRow().getData()),
-            },
-        ],
-    });
-}
-
 function renderCountTables(data) {
     destroyCountTables();
     const matrix = getCountMatrix(data);
     renderTerritorialCountTable(matrix.territorial || {});
-    renderQuestionCountTable(matrix.questions || {});
 }
 
 function resetLocationFilterControl() {
@@ -1860,8 +1545,6 @@ function renderReportEmptyState(message) {
     document.getElementById('statsHighlights').innerHTML = buildEmptyState(message);
     document.getElementById('territorialCountFallback').style.display = 'block';
     document.getElementById('territorialCountFallback').innerHTML = buildEmptyState(message);
-    document.getElementById('questionCountFallback').style.display = 'block';
-    document.getElementById('questionCountFallback').innerHTML = buildEmptyState(message);
     document.getElementById('questionCharts').innerHTML = buildEmptyState(message);
     document.getElementById('matrixPanel').style.display = 'none';
     document.getElementById('textPanel').style.display = 'none';

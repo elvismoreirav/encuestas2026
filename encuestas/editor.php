@@ -156,6 +156,35 @@ function editor_question_preview_state(array $question): array
     ];
 }
 
+function editor_format_percentage(float $value): string
+{
+    return number_format($value, 1, ',', '.') . '%';
+}
+
+function editor_question_activity_state(array $question): array
+{
+    $activity = is_array($question['activity'] ?? null) ? $question['activity'] : [];
+    $responses = (int) ($activity['responses'] ?? 0);
+    $coveragePercentage = (float) ($activity['coverage_percentage'] ?? 0);
+    $firstSubmissionAt = $activity['first_submission_at'] ?? null;
+    $lastSubmissionAt = $activity['last_submission_at'] ?? null;
+    $hasActivity = $responses > 0;
+
+    return [
+        'responses' => $responses,
+        'coverage_percentage' => $coveragePercentage,
+        'status_label' => $hasActivity ? 'Con respuestas' : 'Sin respuestas',
+        'status_class' => $hasActivity ? 'chip chip-success' : 'chip chip-warning',
+        'responses_label' => $responses . ' ' . ($responses === 1 ? 'respuesta' : 'respuestas'),
+        'coverage_label' => 'Cobertura ' . editor_format_percentage($coveragePercentage),
+        'first_submission_label' => Helpers::formatDateTime(is_string($firstSubmissionAt) ? $firstSubmissionAt : null),
+        'last_submission_label' => Helpers::formatDateTime(is_string($lastSubmissionAt) ? $lastSubmissionAt : null),
+        'summary' => $hasActivity
+            ? $responses . ' ' . ($responses === 1 ? 'registro coincide con esta pregunta.' : 'registros coinciden con esta pregunta.')
+            : 'Esta pregunta todavía no registra respuestas enviadas.',
+    ];
+}
+
 function editor_render_question_preview(array $question): string
 {
     $type = (string) ($question['question_type'] ?? '');
@@ -445,6 +474,7 @@ require TEMPLATES_PATH . '/admin_header.php';
                                     implode(' ', array_map(static fn(array $option): string => (string) ($option['label'] ?? ''), $question['options'] ?? [])),
                                 ];
                                 $previewState = editor_question_preview_state($question);
+                                $activityState = editor_question_activity_state($question);
                                 ?>
                                 <article
                                     class="question-item"
@@ -488,6 +518,8 @@ require TEMPLATES_PATH . '/admin_header.php';
                                             <span class="question-support-item"><?= e(editor_question_interaction_hint($question)) ?></span>
                                             <span class="question-support-item"><?= e(editor_question_structure_hint($question)) ?></span>
                                             <span class="<?= e($previewState['class']) ?>"><?= e($previewState['label']) ?></span>
+                                            <span class="<?= e($activityState['status_class']) ?>"><?= e($activityState['status_label']) ?></span>
+                                            <span class="chip chip-muted"><?= e($activityState['responses_label']) ?></span>
                                         </div>
                                         <button
                                             class="btn btn-secondary btn-compact js-toggle-question-preview"
@@ -509,6 +541,19 @@ require TEMPLATES_PATH . '/admin_header.php';
                                                 <?php endif; ?>
                                             </div>
                                             <span class="<?= e($previewState['class']) ?>"><?= e($previewState['label']) ?></span>
+                                        </div>
+                                        <div class="editor-question-activity">
+                                            <div class="editor-question-activity-head">
+                                                <strong>Actividad capturada</strong>
+                                                <span class="<?= e($activityState['status_class']) ?>"><?= e($activityState['status_label']) ?></span>
+                                            </div>
+                                            <div class="question-meta">
+                                                <span class="chip chip-muted"><?= e($activityState['responses_label']) ?></span>
+                                                <span class="chip chip-muted"><?= e($activityState['coverage_label']) ?></span>
+                                                <span class="chip chip-muted">Primera <?= e($activityState['first_submission_label']) ?></span>
+                                                <span class="chip chip-muted">Última <?= e($activityState['last_submission_label']) ?></span>
+                                            </div>
+                                            <p><?= e($activityState['summary']) ?></p>
                                         </div>
                                         <?= editor_render_question_preview($question) ?>
                                     </div>
