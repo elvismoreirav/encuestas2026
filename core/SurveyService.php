@@ -1120,9 +1120,7 @@ class SurveyService
                 $locationOptions,
                 $locationFilter,
                 $baseTotalResponses,
-                $totalResponses,
-                $coverage,
-                $orderedQuestionStats
+                $totalResponses
             ),
         ];
     }
@@ -1870,9 +1868,7 @@ class SurveyService
         array $locationOptions,
         array $locationFilter,
         int $baseTotalResponses,
-        int $filteredResponses,
-        array $coverage,
-        array $questionStats
+        int $filteredResponses
     ): array {
         $selectedValue = (string) ($locationFilter['selected_value'] ?? 'all');
         $territorialRows = [];
@@ -1902,96 +1898,6 @@ class SurveyService
             ? $territorialRows
             : array_values(array_filter($territorialRows, static fn(array $row): bool => (bool) ($row['is_selected'] ?? false)));
 
-        $questionRows = [];
-        $answeredQuestions = 0;
-
-        foreach (array_values($coverage) as $index => $item) {
-            $code = (string) ($item['code'] ?? '');
-            $responses = (int) ($item['responses'] ?? 0);
-            $coveragePercentage = (float) ($item['coverage_percentage'] ?? 0);
-            $stat = $questionStats[$code] ?? null;
-
-            if ($responses > 0) {
-                $answeredQuestions++;
-            }
-
-            $summary = 'Sin respuestas dentro del filtro actual.';
-            $highlightLabel = null;
-            $highlightCount = null;
-            $highlightPercentage = null;
-            $optionBreakdown = [];
-            $otherOptions = [];
-            $otherOptionsSummary = 'Sin lectura adicional.';
-
-            if (is_array($stat)) {
-                if (($stat['type'] ?? '') === 'choice') {
-                    $optionBreakdown = array_values(array_map(static fn(array $option): array => [
-                        'label' => (string) ($option['label'] ?? ''),
-                        'count' => (int) ($option['count'] ?? 0),
-                        'percentage' => (float) ($option['percentage'] ?? 0),
-                    ], array_filter(
-                        (array) ($stat['options'] ?? []),
-                        static fn(array $option): bool => trim((string) ($option['label'] ?? '')) !== ''
-                    )));
-                    $otherOptions = array_slice($optionBreakdown, 1);
-                    $otherOptionsSummary = $this->summarizeAnalyticsOptionRows($otherOptions);
-
-                    $topOption = $stat['options'][0] ?? null;
-                    if (is_array($topOption)) {
-                        $highlightLabel = (string) ($topOption['label'] ?? '');
-                        $highlightCount = (int) ($topOption['count'] ?? 0);
-                        $highlightPercentage = (float) ($topOption['percentage'] ?? 0);
-                        $summary = sprintf(
-                            '%s lidera con %s (%d).',
-                            trim($highlightLabel) !== '' ? $highlightLabel : 'La opción principal',
-                            number_format($highlightPercentage, 1) . '%',
-                            $highlightCount
-                        );
-                    } elseif ($responses > 0) {
-                        $summary = 'Con respuestas registradas, pero sin opciones agregadas suficientes.';
-                    }
-                } elseif (($stat['type'] ?? '') === 'matrix') {
-                    $rowCount = count((array) ($stat['matrix_meta']['rows'] ?? []));
-                    $dimensionCount = count((array) ($stat['matrix_meta']['dimensions'] ?? []));
-                    $summary = $responses > 0
-                        ? sprintf('%d fila(s) y %d dimensión(es) con actividad.', $rowCount, $dimensionCount)
-                        : $summary;
-                } elseif (($stat['type'] ?? '') === 'text') {
-                    $keywordCount = count((array) ($stat['keywords'] ?? []));
-                    $sampleCount = count((array) ($stat['samples'] ?? []));
-                    $summary = $responses > 0
-                        ? ($keywordCount > 0
-                            ? sprintf('%d palabra(s) clave y %d muestra(s) destacadas.', $keywordCount, $sampleCount)
-                            : sprintf('%d respuesta(s) abiertas registradas.', $responses))
-                        : $summary;
-                    $firstKeyword = $stat['keywords'][0] ?? null;
-                    if (is_array($firstKeyword)) {
-                        $highlightLabel = (string) ($firstKeyword['word'] ?? '');
-                        $highlightCount = (int) ($firstKeyword['count'] ?? 0);
-                    }
-                }
-            }
-
-            $questionRows[] = [
-                'position' => $index + 1,
-                'code' => $code,
-                'title' => (string) ($item['title'] ?? ''),
-                'section_title' => (string) ($item['section_title'] ?? 'Sin sección'),
-                'type' => (string) ($item['type'] ?? ''),
-                'type_label' => $this->analyticsQuestionTypeLabel((string) ($item['type'] ?? '')),
-                'responses' => $responses,
-                'coverage_percentage' => $coveragePercentage,
-                'summary' => $summary,
-                'highlight_label' => $highlightLabel,
-                'highlight_count' => $highlightCount,
-                'highlight_percentage' => $highlightPercentage,
-                'option_breakdown' => $optionBreakdown,
-                'other_options' => $otherOptions,
-                'other_options_summary' => $otherOptionsSummary,
-                'has_activity' => $responses > 0,
-            ];
-        }
-
         return [
             'territorial' => [
                 'enabled' => (bool) ($locationFilter['enabled'] ?? false),
@@ -2002,12 +1908,6 @@ class SurveyService
                 'filtered_responses' => $filteredResponses,
                 'rows' => $visibleTerritorialRows,
                 'all_rows' => $territorialRows,
-            ],
-            'questions' => [
-                'filtered_responses' => $filteredResponses,
-                'total_questions' => count($questionRows),
-                'answered_questions' => $answeredQuestions,
-                'rows' => $questionRows,
             ],
         ];
     }
@@ -2071,31 +1971,6 @@ class SurveyService
         ]);
 
         return trim($normalized);
-    }
-
-    private function summarizeAnalyticsOptionRows(array $options): string
-    {
-        $normalized = array_values(array_filter(array_map(static function (array $option): array {
-            return [
-                'label' => trim((string) ($option['label'] ?? '')),
-                'count' => (int) ($option['count'] ?? 0),
-                'percentage' => (float) ($option['percentage'] ?? 0),
-            ];
-        }, $options), static fn(array $option): bool => $option['label'] !== ''));
-
-        if ($normalized === []) {
-            return 'Sin lectura adicional.';
-        }
-
-        return implode(' | ', array_map(
-            static fn(array $option): string => sprintf(
-                '%s · %s (%d)',
-                $option['label'],
-                number_format($option['percentage'], 1) . '%',
-                $option['count']
-            ),
-            $normalized
-        ));
     }
 
     private function buildQuestionAnalysisSegment(
@@ -2173,7 +2048,6 @@ class SurveyService
         $locationFilter = is_array($analytics['location_filter'] ?? null) ? $analytics['location_filter'] : [];
         $countMatrix = is_array($analytics['count_matrix'] ?? null) ? $analytics['count_matrix'] : [];
         $territorial = is_array($countMatrix['territorial'] ?? null) ? $countMatrix['territorial'] : [];
-        $questions = is_array($countMatrix['questions'] ?? null) ? $countMatrix['questions'] : [];
 
         $summaryRows = [
             ['Campo', 'Valor'],
@@ -2214,30 +2088,6 @@ class SurveyService
             ];
         }
 
-        $questionRows = [[
-            '#',
-            'Pregunta',
-            'Sección',
-            'Tipo',
-            'Resp.',
-            'Cobertura',
-            'Lectura rápida',
-            'Otras respuestas',
-        ]];
-
-        foreach ((array) ($questions['rows'] ?? []) as $row) {
-            $questionRows[] = [
-                (int) ($row['position'] ?? 0),
-                trim((string) (($row['code'] ?? '') . '. ' . ($row['title'] ?? '')), '. '),
-                (string) ($row['section_title'] ?? 'Sin sección'),
-                (string) ($row['type_label'] ?? $row['type'] ?? ''),
-                (int) ($row['responses'] ?? 0),
-                (float) ($row['coverage_percentage'] ?? 0),
-                $this->buildAnalyticsQuickReadingLabel(is_array($row) ? $row : []),
-                (string) ($row['other_options_summary'] ?? 'Sin lectura adicional.'),
-            ];
-        }
-
         $filename = Helpers::slugify((string) ($survey['name'] ?? 'reporte')) . '-matriz-conteo';
         $scope = (string) ($analytics['report_scope'] ?? 'primary');
         if ($scope === 'special') {
@@ -2248,7 +2098,6 @@ class SurveyService
         Helpers::downloadXlsx($filename, [
             ['name' => 'Resumen', 'rows' => $summaryRows],
             ['name' => 'Conteo territorial', 'rows' => $territorialRows],
-            ['name' => 'Conteo por pregunta', 'rows' => $questionRows],
         ]);
     }
 
@@ -2710,28 +2559,6 @@ class SurveyService
             'families' => array_values($familyStats),
             'equivalences' => $equivalenceRows,
         ];
-    }
-
-    private function buildAnalyticsQuickReadingLabel(array $row): string
-    {
-        $highlightLabel = trim((string) ($row['highlight_label'] ?? ''));
-        $highlightCount = $row['highlight_count'] ?? null;
-        $highlightPercentage = $row['highlight_percentage'] ?? null;
-
-        if ($highlightLabel !== '' && $highlightPercentage !== null && $highlightPercentage !== '') {
-            return sprintf(
-                '%s · %s (%d)',
-                $highlightLabel,
-                number_format((float) $highlightPercentage, 1) . '%',
-                (int) $highlightCount
-            );
-        }
-
-        if ($highlightLabel !== '' && $highlightCount !== null && $highlightCount !== '') {
-            return sprintf('%s · %d', $highlightLabel, (int) $highlightCount);
-        }
-
-        return (string) ($row['summary'] ?? 'Sin lectura rápida.');
     }
 
     private function buildElectionHomologationQuestionMeta(array $survey): array

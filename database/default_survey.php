@@ -539,6 +539,11 @@ return [
                                 ['code' => 'LEONARDO_ORLANDO', 'label' => 'Leonardo Orlando'],
                                 ['code' => 'PAOLA_PABON', 'label' => 'Paola Pabón'],
                                 ['code' => 'JEAN_TOPIC', 'label' => 'Jean Topic'],
+                                ['code' => 'JAVIER_PINCAY', 'label' => 'Javier Pincay'],
+                                ['code' => 'MARIO_DE_GENNA', 'label' => 'Mario De Genna'],
+                                ['code' => 'JAIME_ESTRADA_PADRE', 'label' => 'Jaime Estrada Padre'],
+                                ['code' => 'JAIME_ESTRADA_HIJO', 'label' => 'Jaime Estrada hijo'],
+                                ['code' => 'ABEL_GOMEZ', 'label' => 'Abel Gómez'],
                             ],
                             'dimensions' => [
                                 ['code' => 'KNOWS', 'label' => '¿Conoce al candidato?', 'options' => $yesNo()],
