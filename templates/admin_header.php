@@ -18,6 +18,7 @@ if ($canManageSurveys) {
 if ($canAccessInsights) {
     $workspaceLinks[] = ['key' => 'responses', 'label' => 'Respuestas', 'icon' => 'messages-square', 'url' => url('respuestas/index.php')];
     $workspaceLinks[] = ['key' => 'reports', 'label' => 'Reportes', 'icon' => 'chart-column-big', 'url' => url('reportes/index.php')];
+    $workspaceLinks[] = ['key' => 'question-analysis', 'label' => 'Análisis por pregunta', 'icon' => 'search', 'url' => url('reportes/preguntas.php')];
     $workspaceLinks[] = ['key' => 'homologation', 'label' => 'Homologación', 'icon' => 'workflow', 'url' => url('homologacion/index.php')];
 }
 
@@ -69,6 +70,9 @@ $workspaceLinks[] = ['key' => 'public-form', 'label' => 'Formulario público', '
                 </a>
                 <a class="nav-link <?= $currentPage === 'reports' ? 'active' : '' ?>" href="<?= url('reportes/index.php') ?>">
                     <i data-lucide="chart-column-big"></i><span>Reportes</span>
+                </a>
+                <a class="nav-link <?= $currentPage === 'question-analysis' ? 'active' : '' ?>" href="<?= url('reportes/preguntas.php') ?>">
+                    <i data-lucide="search"></i><span>Análisis por pregunta</span>
                 </a>
                 <a class="nav-link <?= $currentPage === 'homologation' ? 'active' : '' ?>" href="<?= url('homologacion/index.php') ?>">
                     <i data-lucide="workflow"></i><span>Homologación</span>
