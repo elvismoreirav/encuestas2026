@@ -1400,14 +1400,39 @@ th {
     color: var(--text-soft);
 }
 
+.question-segment-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 10px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(30, 77, 57, 0.24) rgba(30, 77, 57, 0.08);
+}
+
+.question-segment-scroll::-webkit-scrollbar {
+    height: 10px;
+}
+
+.question-segment-scroll::-webkit-scrollbar-track {
+    background: rgba(30, 77, 57, 0.08);
+    border-radius: 999px;
+}
+
+.question-segment-scroll::-webkit-scrollbar-thumb {
+    background: rgba(30, 77, 57, 0.24);
+    border-radius: 999px;
+}
+
 .question-segment-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    display: flex;
     gap: 18px;
+    width: max-content;
+    min-width: 100%;
 }
 
 .question-segment-card {
-    min-width: 0;
+    flex: 0 0 clamp(300px, 32vw, 380px);
+    width: clamp(300px, 32vw, 380px);
+    min-width: 300px;
 }
 
 .question-segment-row {
