@@ -315,6 +315,49 @@ class SurveyService
         return $this->hydrateSurvey($survey, $publicOnly);
     }
 
+    private function buildSurveyQuestionActivitySummary(int $surveyId): array
+    {
+        $totalResponses = (int) $this->db->fetchColumn(
+            'SELECT COUNT(*) FROM survey_responses WHERE survey_id = :survey_id',
+            [':survey_id' => $surveyId]
+        );
+
+        $rows = $this->db->fetchAll(
+            'SELECT
+                ra.question_id,
+                COUNT(*) AS responses,
+                MIN(sr.submitted_at) AS first_submission_at,
+                MAX(sr.submitted_at) AS last_submission_at
+             FROM survey_responses sr
+             INNER JOIN response_answers ra ON ra.response_id = sr.id
+             WHERE sr.survey_id = :survey_id
+             GROUP BY ra.question_id',
+            [':survey_id' => $surveyId]
+        );
+
+        $questions = [];
+        foreach ($rows as $row) {
+            $questionId = (int) ($row['question_id'] ?? 0);
+            if ($questionId <= 0) {
+                continue;
+            }
+
+            $responses = (int) ($row['responses'] ?? 0);
+            $questions[$questionId] = [
+                'responses' => $responses,
+                'coverage_percentage' => $totalResponses > 0 ? round(($responses / $totalResponses) * 100, 1) : 0.0,
+                'first_submission_at' => $row['first_submission_at'] ?? null,
+                'last_submission_at' => $row['last_submission_at'] ?? null,
+                'has_activity' => $responses > 0,
+            ];
+        }
+
+        return [
+            'response_count' => $totalResponses,
+            'questions' => $questions,
+        ];
+    }
+
     public function saveSurvey(array $payload, int $userId, ?array $actor = null): int
     {
         $now = date('Y-m-d H:i:s');
@@ -3210,12 +3253,23 @@ class SurveyService
             }
         }
 
+        $activitySummary = $publicOnly
+            ? ['response_count' => 0, 'questions' => []]
+            : $this->buildSurveyQuestionActivitySummary((int) $survey['id']);
+
         foreach ($questions as &$question) {
             $question['is_required'] = (bool) $question['is_required'];
             $question['visibility_rules'] = Helpers::decodeJson($question['visibility_rules_json'], []);
             $question['validation_rules'] = Helpers::decodeJson($question['validation_rules_json'], []);
             $question['settings'] = Helpers::decodeJson($question['settings_json'], []);
             $question['options'] = $optionsByQuestion[(int) $question['id']] ?? [];
+            $question['activity'] = $activitySummary['questions'][(int) $question['id']] ?? [
+                'responses' => 0,
+                'coverage_percentage' => 0.0,
+                'first_submission_at' => null,
+                'last_submission_at' => null,
+                'has_activity' => false,
+            ];
 
             if ($publicOnly) {
                 unset($question['visibility_rules_json'], $question['validation_rules_json'], $question['settings_json']);
@@ -3242,6 +3296,7 @@ class SurveyService
         $survey['questions_flat'] = $questions;
         $survey['window_status'] = $this->resolveWindowStatus($survey);
         $survey['status_label'] = Helpers::statusLabel($survey['status']);
+        $survey['response_count'] = (int) ($activitySummary['response_count'] ?? 0);
 
         if ($publicOnly) {
             unset(
