@@ -1084,6 +1084,428 @@ class SurveyService
         ];
     }
 
+    public function analyticsQuestionCatalog(int $surveyId, array $filters = [], ?array $user = null): array
+    {
+        $survey = $this->getSurvey($surveyId, $user);
+        if (!$survey) {
+            throw new InvalidArgumentException('Encuesta no encontrada.');
+        }
+
+        $reportScope = $this->normalizeAnalyticsReportScope($filters['report_scope'] ?? null);
+        $analyticsSections = $survey['sections'];
+        $analyticsQuestions = $this->filterAnalyticsQuestionsByScope($survey['questions_flat'], $reportScope);
+
+        $sectionTitles = [];
+        foreach ($analyticsSections as $section) {
+            $sectionTitles[(int) $section['id']] = (string) ($section['title'] ?? 'Sin sección');
+        }
+
+        $questions = [];
+        foreach ($analyticsQuestions as $question) {
+            $questions[] = [
+                'id' => (int) ($question['id'] ?? 0),
+                'code' => (string) ($question['code'] ?? ''),
+                'title' => $this->sanitizeAnalyticsQuestionTitle((string) ($question['prompt'] ?? '')),
+                'section_title' => $sectionTitles[(int) ($question['section_id'] ?? 0)] ?? 'Sin sección',
+                'type' => (string) ($question['question_type'] ?? ''),
+                'type_label' => $this->analyticsQuestionTypeLabel((string) ($question['question_type'] ?? '')),
+                'sort_order' => (int) ($question['sort_order'] ?? 0),
+            ];
+        }
+
+        return [
+            'survey' => [
+                'id' => (int) ($survey['id'] ?? 0),
+                'name' => (string) ($survey['name'] ?? 'Encuesta'),
+            ],
+            'report_scope' => $reportScope,
+            'report_scope_label' => $this->analyticsReportScopeLabel($reportScope),
+            'questions' => $questions,
+        ];
+    }
+
+    public function analyticsQuestionAnalysis(int $surveyId, string $questionCode, array $filters = [], ?array $user = null): array
+    {
+        $survey = $this->getSurvey($surveyId, $user);
+        if (!$survey) {
+            throw new InvalidArgumentException('Encuesta no encontrada.');
+        }
+
+        $reportScope = $this->normalizeAnalyticsReportScope($filters['report_scope'] ?? null);
+        $analyticsSections = $survey['sections'];
+        $analyticsQuestions = $this->filterAnalyticsQuestionsByScope($survey['questions_flat'], $reportScope);
+
+        $sectionTitles = [];
+        foreach ($analyticsSections as $section) {
+            $sectionTitles[(int) $section['id']] = (string) ($section['title'] ?? 'Sin sección');
+        }
+
+        $questionMeta = [];
+        $selectedQuestion = null;
+        $selectedQuestionLookupCode = strtoupper(trim($questionCode));
+
+        foreach ($analyticsQuestions as $question) {
+            $optionLabels = [];
+            foreach ((array) ($question['options'] ?? []) as $option) {
+                $optionCode = trim((string) ($option['code'] ?? ''));
+                if ($optionCode === '') {
+                    continue;
+                }
+                $optionLabels[$optionCode] = trim((string) ($option['label'] ?? $optionCode));
+            }
+
+            $normalizedCode = strtoupper(trim((string) ($question['code'] ?? '')));
+            $questionMeta[$normalizedCode] = [
+                'id' => (int) ($question['id'] ?? 0),
+                'code' => (string) ($question['code'] ?? ''),
+                'title' => $this->sanitizeAnalyticsQuestionTitle((string) ($question['prompt'] ?? '')),
+                'type' => (string) ($question['question_type'] ?? ''),
+                'section_id' => (int) ($question['section_id'] ?? 0),
+                'section_title' => $sectionTitles[(int) ($question['section_id'] ?? 0)] ?? 'Sin sección',
+                'settings' => $question['settings'] ?? [],
+                'options' => $question['options'] ?? [],
+                'option_labels' => $optionLabels,
+                'raw' => $question,
+            ];
+
+            if ($normalizedCode !== '' && $normalizedCode === $selectedQuestionLookupCode) {
+                $selectedQuestion = $question;
+            }
+        }
+
+        if (!$selectedQuestion) {
+            throw new InvalidArgumentException('La pregunta seleccionada no existe dentro del alcance actual.');
+        }
+
+        $selectedMeta = $questionMeta[$selectedQuestionLookupCode];
+        $selectedQuestionCode = (string) ($selectedMeta['code'] ?? '');
+        if ($selectedQuestionCode === '') {
+            throw new InvalidArgumentException('La pregunta seleccionada no es válida.');
+        }
+
+        $baseWhere = ['sr.survey_id = :survey_id'];
+        $baseParams = [':survey_id' => $surveyId];
+
+        if (!empty($filters['from'])) {
+            $baseWhere[] = 'sr.submitted_at >= :from';
+            $baseParams[':from'] = $filters['from'] . ' 00:00:00';
+        }
+
+        if (!empty($filters['to'])) {
+            $baseWhere[] = 'sr.submitted_at <= :to';
+            $baseParams[':to'] = $filters['to'] . ' 23:59:59';
+        }
+
+        $totalResponses = (int) $this->db->fetchColumn(
+            'SELECT COUNT(*) FROM survey_responses sr WHERE ' . implode(' AND ', $baseWhere),
+            $baseParams
+        );
+
+        $answeredWhere = $baseWhere;
+        $answeredWhere[] = 'EXISTS (
+            SELECT 1
+            FROM response_answers ra_target
+            WHERE ra_target.response_id = sr.id
+              AND ra_target.question_code = :selected_question_code
+        )';
+        $answeredParams = [':selected_question_code' => $selectedQuestionCode] + $baseParams;
+
+        $questionResponses = (int) $this->db->fetchColumn(
+            'SELECT COUNT(*) FROM survey_responses sr WHERE ' . implode(' AND ', $answeredWhere),
+            $answeredParams
+        );
+
+        $firstQuestionSubmission = $this->db->fetch(
+            'SELECT MIN(sr.submitted_at) AS first_submission_at, MAX(sr.submitted_at) AS last_submission_at
+             FROM survey_responses sr
+             WHERE ' . implode(' AND ', $answeredWhere),
+            $answeredParams
+        ) ?: [];
+
+        $coveragePercentage = $totalResponses > 0 ? round(($questionResponses / $totalResponses) * 100, 1) : 0.0;
+        $distribution = [
+            'kind' => 'empty',
+            'summary' => 'Sin respuestas dentro del filtro actual.',
+        ];
+
+        $type = (string) ($selectedMeta['type'] ?? '');
+
+        if (in_array($type, ['single_choice', 'multiple_choice', 'rating'], true)) {
+            $optionMap = [];
+            foreach ((array) ($selectedMeta['options'] ?? []) as $option) {
+                $optionCode = trim((string) ($option['code'] ?? ''));
+                if ($optionCode === '') {
+                    continue;
+                }
+
+                $label = $this->resolveAnalyticsOptionLabel(
+                    $selectedMeta,
+                    $optionCode,
+                    (string) ($option['label'] ?? $optionCode)
+                );
+                $bucketKey = $this->analyticsOptionBucketKey($label, $optionCode);
+                $optionMap[$bucketKey] = [
+                    'code' => $optionCode,
+                    'label' => $label,
+                    'count' => 0,
+                    'percentage' => 0.0,
+                ];
+            }
+
+            $optionRows = $this->db->fetchAll(
+                "SELECT
+                    rao.option_code,
+                    MIN(rao.option_label) AS option_label,
+                    COUNT(*) AS total
+                 FROM survey_responses sr
+                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_code = :question_code
+                 INNER JOIN response_answer_options rao ON rao.response_answer_id = ra.id
+                 WHERE " . implode(' AND ', $baseWhere) . '
+                 GROUP BY rao.option_code
+                 ORDER BY total DESC, rao.option_code ASC',
+                [':question_code' => $selectedQuestionCode] + $baseParams
+            );
+
+            foreach ($optionRows as $row) {
+                $optionCode = (string) ($row['option_code'] ?? '');
+                $label = $this->resolveAnalyticsOptionLabel(
+                    $selectedMeta,
+                    $optionCode,
+                    (string) ($row['option_label'] ?? $optionCode)
+                );
+                $bucketKey = $this->analyticsOptionBucketKey($label, $optionCode);
+                $optionMap[$bucketKey] ??= [
+                    'code' => $optionCode,
+                    'label' => $label,
+                    'count' => 0,
+                    'percentage' => 0.0,
+                ];
+                $optionMap[$bucketKey]['count'] += (int) ($row['total'] ?? 0);
+            }
+
+            $options = array_values($optionMap);
+            foreach ($options as &$option) {
+                $option['percentage'] = $questionResponses > 0
+                    ? round(($option['count'] / $questionResponses) * 100, 1)
+                    : 0.0;
+            }
+            unset($option);
+
+            usort($options, static function (array $left, array $right): int {
+                return ((int) ($right['count'] ?? 0) <=> (int) ($left['count'] ?? 0))
+                    ?: strcmp((string) ($left['label'] ?? ''), (string) ($right['label'] ?? ''));
+            });
+
+            $topOption = $options[0] ?? null;
+            $runnerUp = $options[1] ?? null;
+            $marginPercentage = $topOption && $runnerUp
+                ? round(((float) ($topOption['percentage'] ?? 0)) - ((float) ($runnerUp['percentage'] ?? 0)), 1)
+                : null;
+
+            $distribution = [
+                'kind' => 'choice',
+                'options' => $options,
+                'top_option' => $topOption,
+                'runner_up' => $runnerUp,
+                'margin_percentage' => $marginPercentage,
+                'summary' => $topOption
+                    ? sprintf(
+                        '%s lidera con %s (%d).',
+                        trim((string) ($topOption['label'] ?? '')) !== '' ? (string) $topOption['label'] : 'La opción principal',
+                        number_format((float) ($topOption['percentage'] ?? 0), 1) . '%',
+                        (int) ($topOption['count'] ?? 0)
+                    )
+                    : 'Sin respuestas dentro del filtro actual.',
+            ];
+        } elseif (in_array($type, ['text', 'textarea'], true)) {
+            $textRows = $this->db->fetchAll(
+                "SELECT TRIM(COALESCE(ra.answer_text, '')) AS answer_text
+                 FROM survey_responses sr
+                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_code = :question_code
+                 WHERE " . implode(' AND ', $baseWhere) . " AND TRIM(COALESCE(ra.answer_text, '')) <> ''
+                 ORDER BY sr.submitted_at DESC",
+                [':question_code' => $selectedQuestionCode] + $baseParams
+            );
+
+            $texts = array_values(array_filter(array_map(
+                static fn(array $row): string => trim((string) ($row['answer_text'] ?? '')),
+                $textRows
+            ), static fn(string $text): bool => $text !== ''));
+
+            $topAnswers = $this->topExactTextAnswers($texts);
+            $keywords = $this->topKeywords($texts);
+
+            $distribution = [
+                'kind' => 'text',
+                'keywords' => $keywords,
+                'top_answers' => $topAnswers,
+                'samples' => array_slice($texts, 0, 8),
+                'summary' => $questionResponses > 0
+                    ? ($topAnswers !== []
+                        ? sprintf(
+                            '"%s" aparece %d vez/veces.',
+                            (string) ($topAnswers[0]['label'] ?? ''),
+                            (int) ($topAnswers[0]['count'] ?? 0)
+                        )
+                        : sprintf('%d respuesta(s) abiertas registradas.', $questionResponses))
+                    : 'Sin respuestas abiertas dentro del filtro actual.',
+            ];
+        } elseif ($type === 'matrix') {
+            $matrixRows = $this->db->fetchAll(
+                "SELECT COALESCE(ra.answer_json, '') AS answer_json
+                 FROM survey_responses sr
+                 INNER JOIN response_answers ra ON ra.response_id = sr.id AND ra.question_code = :question_code
+                 WHERE " . implode(' AND ', $baseWhere) . " AND COALESCE(ra.answer_json, '') <> ''",
+                [':question_code' => $selectedQuestionCode] + $baseParams
+            );
+
+            $matrixData = [];
+            foreach ($matrixRows as $row) {
+                $payload = Helpers::decodeJson((string) ($row['answer_json'] ?? ''), []);
+                foreach ($payload as $rowCode => $dimensions) {
+                    foreach ((array) $dimensions as $dimensionCode => $valueCode) {
+                        if ($valueCode === null || $valueCode === '') {
+                            continue;
+                        }
+                        $matrixData[$rowCode][$dimensionCode][$valueCode] = ($matrixData[$rowCode][$dimensionCode][$valueCode] ?? 0) + 1;
+                    }
+                }
+            }
+
+            $distribution = [
+                'kind' => 'matrix',
+                'rows' => $this->buildQuestionAnalysisMatrixRows($selectedMeta, $matrixData),
+                'summary' => $questionResponses > 0
+                    ? sprintf('%d respuesta(s) matriciales registradas.', $questionResponses)
+                    : 'Sin respuestas matriciales dentro del filtro actual.',
+            ];
+        }
+
+        $territoryQuestion = $this->resolveAnalyticsLocationQuestion($survey);
+        $territoryQuestionCode = strtoupper(trim((string) ($territoryQuestion['code'] ?? '')));
+        $localityQuestion = $this->resolveAnalyticsLocalityQuestion(
+            $survey,
+            array_values(array_filter([$territoryQuestionCode !== '' ? $territoryQuestionCode : null, $selectedQuestionLookupCode]))
+        );
+        $ageQuestion = $this->resolveAnalyticsAgeQuestion(
+            $survey,
+            array_values(array_filter([$territoryQuestionCode !== '' ? $territoryQuestionCode : null, $selectedQuestionLookupCode]))
+        );
+
+        $demographics = [
+            'territory' => $this->buildQuestionAnalysisSegment(
+                $survey,
+                $answeredWhere,
+                $answeredParams,
+                $territoryQuestion,
+                $questionResponses,
+                'territory'
+            ),
+            'locality' => $this->buildQuestionAnalysisSegment(
+                $survey,
+                $answeredWhere,
+                $answeredParams,
+                $localityQuestion,
+                $questionResponses,
+                'locality'
+            ),
+            'age' => $this->buildQuestionAnalysisSegment(
+                $survey,
+                $answeredWhere,
+                $answeredParams,
+                $ageQuestion,
+                $questionResponses,
+                'age'
+            ),
+        ];
+
+        $highlights = [
+            [
+                'tone' => 'primary',
+                'title' => 'Cobertura',
+                'value' => number_format($coveragePercentage, 1) . '%',
+                'description' => sprintf('%d de %d respuestas contestaron esta pregunta.', $questionResponses, $totalResponses),
+            ],
+            [
+                'tone' => 'neutral',
+                'title' => 'Tipo de lectura',
+                'value' => $this->analyticsQuestionTypeLabel($type),
+                'description' => (string) ($selectedMeta['section_title'] ?? 'Sin sección'),
+            ],
+        ];
+
+        if (($distribution['kind'] ?? '') === 'choice' && is_array($distribution['top_option'] ?? null)) {
+            $topOption = $distribution['top_option'];
+            $highlights[] = [
+                'tone' => 'success',
+                'title' => 'Respuesta dominante',
+                'value' => (string) ($topOption['label'] ?? ''),
+                'description' => number_format((float) ($topOption['percentage'] ?? 0), 1) . '% · ' . (int) ($topOption['count'] ?? 0) . ' registro(s)',
+            ];
+        } elseif (($distribution['kind'] ?? '') === 'text' && !empty($distribution['top_answers'][0])) {
+            $topAnswer = $distribution['top_answers'][0];
+            $highlights[] = [
+                'tone' => 'success',
+                'title' => 'Texto más repetido',
+                'value' => (string) ($topAnswer['label'] ?? ''),
+                'description' => (int) ($topAnswer['count'] ?? 0) . ' mención(es)',
+            ];
+        } elseif (($distribution['kind'] ?? '') === 'matrix' && !empty($distribution['rows'][0]['dimensions'][0]['options'][0])) {
+            $topMatrixOption = $distribution['rows'][0]['dimensions'][0]['options'][0];
+            $highlights[] = [
+                'tone' => 'success',
+                'title' => 'Mayor concentración',
+                'value' => (string) ($topMatrixOption['label'] ?? ''),
+                'description' => number_format((float) ($topMatrixOption['percentage'] ?? 0), 1) . '% dentro de su dimensión',
+            ];
+        }
+
+        foreach (['territory', 'locality', 'age'] as $segmentKey) {
+            $segment = $demographics[$segmentKey] ?? null;
+            if (!is_array($segment) || empty($segment['top_label'])) {
+                continue;
+            }
+
+            $highlights[] = [
+                'tone' => $segmentKey === 'age' ? 'muted' : 'warning',
+                'title' => (string) ($segment['label'] ?? 'Perfil'),
+                'value' => (string) ($segment['top_label'] ?? ''),
+                'description' => number_format((float) ($segment['top_percentage'] ?? 0), 1) . '% · ' . (int) ($segment['top_count'] ?? 0) . ' registro(s)',
+            ];
+        }
+
+        return [
+            'survey' => [
+                'id' => (int) ($survey['id'] ?? 0),
+                'name' => (string) ($survey['name'] ?? 'Encuesta'),
+            ],
+            'report_scope' => $reportScope,
+            'report_scope_label' => $this->analyticsReportScopeLabel($reportScope),
+            'filters' => [
+                'from' => $filters['from'] ?? null,
+                'to' => $filters['to'] ?? null,
+            ],
+            'question' => [
+                'id' => (int) ($selectedMeta['id'] ?? 0),
+                'code' => $selectedQuestionCode,
+                'title' => (string) ($selectedMeta['title'] ?? ''),
+                'type' => $type,
+                'type_label' => $this->analyticsQuestionTypeLabel($type),
+                'section_title' => (string) ($selectedMeta['section_title'] ?? 'Sin sección'),
+            ],
+            'summary' => [
+                'survey_responses' => $totalResponses,
+                'question_responses' => $questionResponses,
+                'coverage_percentage' => $coveragePercentage,
+                'first_submission_at' => $firstQuestionSubmission['first_submission_at'] ?? null,
+                'last_submission_at' => $firstQuestionSubmission['last_submission_at'] ?? null,
+            ],
+            'distribution' => $distribution,
+            'demographics' => $demographics,
+            'highlights' => array_slice($highlights, 0, 6),
+        ];
+    }
+
     private function normalizeAnalyticsReportScope(mixed $value): string
     {
         $normalized = strtolower(trim((string) ($value ?? '')));
@@ -1127,6 +1549,19 @@ class SurveyService
 
     private function resolveAnalyticsLocationQuestion(array $survey): ?array
     {
+        $matchedQuestion = $this->findAnalyticsQuestionBySignals($survey, [
+            'canton' => 10,
+            'cantón' => 10,
+            'ciudad' => 10,
+            'provincia' => 8,
+            'territorio' => 6,
+            'ubicacion' => 4,
+            'ubicación' => 4,
+        ], ['single_choice', 'multiple_choice', 'rating', 'text', 'textarea']);
+        if (is_array($matchedQuestion)) {
+            return $matchedQuestion;
+        }
+
         $firstSection = $survey['sections'][0] ?? null;
         if (is_array($firstSection) && !empty($firstSection['questions'][0]) && is_array($firstSection['questions'][0])) {
             return $firstSection['questions'][0];
@@ -1134,6 +1569,93 @@ class SurveyService
 
         $fallback = $survey['questions_flat'][0] ?? null;
         return is_array($fallback) ? $fallback : null;
+    }
+
+    private function resolveAnalyticsLocalityQuestion(array $survey, array $excludeCodes = []): ?array
+    {
+        return $this->findAnalyticsQuestionBySignals($survey, [
+            'parroquia' => 10,
+            'barrio' => 9,
+            'sector' => 8,
+            'recinto' => 8,
+            'comunidad' => 8,
+            'localidad' => 7,
+            'ubicacion' => 6,
+            'ubicación' => 6,
+        ], ['single_choice', 'multiple_choice', 'rating', 'text', 'textarea'], $excludeCodes);
+    }
+
+    private function resolveAnalyticsAgeQuestion(array $survey, array $excludeCodes = []): ?array
+    {
+        return $this->findAnalyticsQuestionBySignals($survey, [
+            'rango de edad' => 12,
+            'grupo etario' => 11,
+            'edad' => 10,
+            'etario' => 9,
+        ], ['single_choice', 'multiple_choice', 'rating', 'text', 'textarea'], $excludeCodes);
+    }
+
+    private function findAnalyticsQuestionBySignals(
+        array $survey,
+        array $signals,
+        array $allowedTypes = [],
+        array $excludeCodes = []
+    ): ?array {
+        $excludeLookup = [];
+        foreach ($excludeCodes as $excludeCode) {
+            $normalizedCode = strtoupper(trim((string) $excludeCode));
+            if ($normalizedCode !== '') {
+                $excludeLookup[$normalizedCode] = true;
+            }
+        }
+
+        $bestQuestion = null;
+        $bestScore = 0;
+
+        foreach ((array) ($survey['questions_flat'] ?? []) as $question) {
+            $questionCode = strtoupper(trim((string) ($question['code'] ?? '')));
+            if ($questionCode === '' || isset($excludeLookup[$questionCode])) {
+                continue;
+            }
+
+            $questionType = (string) ($question['question_type'] ?? '');
+            if ($allowedTypes !== [] && !in_array($questionType, $allowedTypes, true)) {
+                continue;
+            }
+
+            $haystack = $this->normalizeAnalyticsSearchText(implode(' ', array_filter([
+                (string) ($question['code'] ?? ''),
+                (string) ($question['prompt'] ?? ''),
+                (string) ($question['help_text'] ?? ''),
+            ])));
+
+            $score = 0;
+            foreach ($signals as $signal => $weight) {
+                $normalizedSignal = $this->normalizeAnalyticsSearchText((string) $signal);
+                if ($normalizedSignal !== '' && str_contains($haystack, $normalizedSignal)) {
+                    $score += (int) $weight;
+                }
+            }
+
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestQuestion = $question;
+            }
+        }
+
+        return $bestScore > 0 ? $bestQuestion : null;
+    }
+
+    private function normalizeAnalyticsSearchText(string $value): string
+    {
+        $normalized = mb_strtolower(trim($value), 'UTF-8');
+        $normalized = strtr($normalized, [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u',
+            'ä' => 'a', 'ë' => 'e', 'ï' => 'i', 'ö' => 'o', 'ü' => 'u',
+            'ñ' => 'n',
+        ]);
+        $normalized = preg_replace('/\s+/', ' ', $normalized) ?: $normalized;
+        return trim($normalized);
     }
 
     private function normalizeAnalyticsFilterValue(mixed $value): ?string
@@ -1531,6 +2053,74 @@ class SurveyService
             ),
             $normalized
         ));
+    }
+
+    private function buildQuestionAnalysisSegment(
+        array $survey,
+        array $where,
+        array $params,
+        ?array $question,
+        int $questionResponses,
+        string $segmentKey
+    ): ?array {
+        if (!is_array($question)) {
+            return null;
+        }
+
+        $questionCode = trim((string) ($question['code'] ?? ''));
+        if ($questionCode === '') {
+            return null;
+        }
+
+        $options = $this->fetchAnalyticsLocationOptions($question, $where, $params);
+        $distribution = $this->buildAnalyticsLocationDistribution($options, $questionResponses);
+        $topRow = $distribution[0] ?? null;
+
+        return [
+            'key' => $segmentKey,
+            'label' => $this->questionAnalysisSegmentLabel($segmentKey, $question),
+            'question_code' => $questionCode,
+            'question_title' => (string) ($question['prompt'] ?? $questionCode),
+            'question_type' => (string) ($question['question_type'] ?? ''),
+            'top_label' => is_array($topRow) ? (string) ($topRow['label'] ?? '') : null,
+            'top_count' => is_array($topRow) ? (int) ($topRow['count'] ?? 0) : null,
+            'top_percentage' => is_array($topRow) ? (float) ($topRow['percentage'] ?? 0) : null,
+            'rows' => $distribution,
+        ];
+    }
+
+    private function questionAnalysisSegmentLabel(string $segmentKey, array $question): string
+    {
+        $prompt = $this->normalizeAnalyticsSearchText((string) ($question['prompt'] ?? ''));
+
+        if ($segmentKey === 'age') {
+            return 'Rango de edad';
+        }
+
+        if ($segmentKey === 'territory') {
+            if (str_contains($prompt, 'provincia')) {
+                return 'Provincia';
+            }
+            if (str_contains($prompt, 'canton') || str_contains($prompt, 'ciudad')) {
+                return 'Ciudad / cantón';
+            }
+            return 'Territorio';
+        }
+
+        if (str_contains($prompt, 'parroquia')) {
+            return 'Parroquia';
+        }
+        if (str_contains($prompt, 'barrio') || str_contains($prompt, 'sector')) {
+            return 'Barrio / sector';
+        }
+        if (str_contains($prompt, 'recinto')) {
+            return 'Recinto';
+        }
+        if (str_contains($prompt, 'comunidad')) {
+            return 'Comunidad';
+        }
+
+        return 'Ubicación local';
     }
 
     public function downloadAnalyticsCountMatrixXlsx(array $analytics): never
@@ -3493,6 +4083,100 @@ class SurveyService
         }
 
         return array_slice($highlights, 0, 6);
+    }
+
+    private function buildQuestionAnalysisMatrixRows(array $questionMeta, array $matrixData): array
+    {
+        if ($matrixData === []) {
+            return [];
+        }
+
+        $matrixMeta = $this->buildMatrixMeta($questionMeta, $matrixData);
+        $rows = [];
+
+        foreach ((array) ($matrixMeta['rows'] ?? []) as $rowMeta) {
+            $rowCode = (string) ($rowMeta['code'] ?? '');
+            $dimensions = [];
+
+            foreach ((array) ($matrixMeta['dimensions'] ?? []) as $dimensionMeta) {
+                $dimensionCode = (string) ($dimensionMeta['code'] ?? '');
+                $dimensionCounts = (array) ($matrixData[$rowCode][$dimensionCode] ?? []);
+                $dimensionTotal = array_sum(array_map('intval', $dimensionCounts));
+                $options = [];
+
+                foreach ((array) ($dimensionMeta['options'] ?? []) as $optionMeta) {
+                    $optionCode = (string) ($optionMeta['code'] ?? '');
+                    $count = (int) ($dimensionCounts[$optionCode] ?? 0);
+                    $options[] = [
+                        'code' => $optionCode,
+                        'label' => trim((string) ($optionMeta['label'] ?? $optionCode)) ?: $optionCode,
+                        'count' => $count,
+                        'percentage' => $dimensionTotal > 0 ? round(($count / $dimensionTotal) * 100, 1) : 0.0,
+                    ];
+                }
+
+                usort($options, static function (array $left, array $right): int {
+                    return ((int) ($right['count'] ?? 0) <=> (int) ($left['count'] ?? 0))
+                        ?: strcmp((string) ($left['label'] ?? ''), (string) ($right['label'] ?? ''));
+                });
+
+                $dimensions[] = [
+                    'code' => $dimensionCode,
+                    'label' => trim((string) ($dimensionMeta['label'] ?? $dimensionCode)) ?: $dimensionCode,
+                    'total' => $dimensionTotal,
+                    'options' => $options,
+                ];
+            }
+
+            usort($dimensions, static fn(array $left, array $right): int => ((int) ($right['total'] ?? 0) <=> (int) ($left['total'] ?? 0)));
+
+            $rows[] = [
+                'code' => $rowCode,
+                'label' => trim((string) ($rowMeta['label'] ?? $rowCode)) ?: $rowCode,
+                'dimensions' => $dimensions,
+            ];
+        }
+
+        usort($rows, static function (array $left, array $right): int {
+            $leftTotal = array_sum(array_map(static fn(array $dimension): int => (int) ($dimension['total'] ?? 0), (array) ($left['dimensions'] ?? [])));
+            $rightTotal = array_sum(array_map(static fn(array $dimension): int => (int) ($dimension['total'] ?? 0), (array) ($right['dimensions'] ?? [])));
+            return $rightTotal <=> $leftTotal;
+        });
+
+        return $rows;
+    }
+
+    private function topExactTextAnswers(array $texts, int $limit = 8): array
+    {
+        $frequencies = [];
+        $labels = [];
+
+        foreach ($texts as $text) {
+            $label = trim((string) $text);
+            if ($label === '') {
+                continue;
+            }
+
+            $normalized = $this->normalizeAnalyticsSearchText($label);
+            if ($normalized === '') {
+                continue;
+            }
+
+            $frequencies[$normalized] = ($frequencies[$normalized] ?? 0) + 1;
+            $labels[$normalized] ??= $label;
+        }
+
+        arsort($frequencies);
+
+        $rows = [];
+        foreach (array_slice($frequencies, 0, $limit, true) as $normalized => $count) {
+            $rows[] = [
+                'label' => (string) ($labels[$normalized] ?? $normalized),
+                'count' => (int) $count,
+            ];
+        }
+
+        return $rows;
     }
 
     private function topKeywords(array $texts): array

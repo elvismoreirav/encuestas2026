@@ -69,6 +69,14 @@ require TEMPLATES_PATH . '/admin_header.php';
                 <strong>Reporte aparte</strong>
                 <p>Consulte únicamente las preguntas marcadas para revisión separada.</p>
             </a>
+            <a class="shortcut-card" href="<?= url('reportes/preguntas.php') ?>">
+                <strong>Análisis por pregunta</strong>
+                <p>Busque una pregunta específica y genere su lectura estadística individual bajo demanda.</p>
+            </a>
+            <a class="shortcut-card" href="<?= url('homologacion/index.php') ?>">
+                <strong>Homologación electoral</strong>
+                <p>Unifique papeletas de prefectura y alcaldías bajo bloques comparables como RC, ADN y otras marcas.</p>
+            </a>
         <?php endif; ?>
         <?php if (auth()->canManageUsers()): ?>
             <a class="shortcut-card" href="<?= url('usuarios/index.php') ?>">
@@ -131,6 +139,8 @@ require TEMPLATES_PATH . '/admin_header.php';
                             <?php if ($canAccessInsights): ?>
                                 <a class="btn btn-secondary" href="<?= url('reportes/index.php?survey_id=' . (int) $survey['id']) ?>">Ver reporte</a>
                                 <a class="btn btn-secondary" href="<?= url('reportes/index.php?survey_id=' . (int) $survey['id'] . '&report_scope=special') ?>">Reporte aparte</a>
+                                <a class="btn btn-secondary" href="<?= url('reportes/preguntas.php?survey_id=' . (int) $survey['id']) ?>">Análisis por pregunta</a>
+                                <a class="btn btn-secondary" href="<?= url('homologacion/index.php?survey_id=' . (int) $survey['id']) ?>">Homologación</a>
                             <?php endif; ?>
                         </td>
                     </tr>

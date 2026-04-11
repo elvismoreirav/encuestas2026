@@ -113,6 +113,25 @@ try {
             ], $authUser);
             surveys()->downloadAnalyticsCountMatrixXlsx($stats);
 
+        case 'question_catalog':
+            $requirePermission(auth()->canAccessInsights(), 'No tiene permisos para consultar reportes.');
+            $surveyId = (int) ($payload['survey_id'] ?? 0);
+            $catalog = surveys()->analyticsQuestionCatalog($surveyId, [
+                'report_scope' => $payload['report_scope'] ?? null,
+            ], $authUser);
+            json_response(['success' => true, 'data' => $catalog]);
+
+        case 'question_analysis':
+            $requirePermission(auth()->canAccessInsights(), 'No tiene permisos para consultar reportes.');
+            $surveyId = (int) ($payload['survey_id'] ?? 0);
+            $questionCode = (string) ($payload['question_code'] ?? '');
+            $analysis = surveys()->analyticsQuestionAnalysis($surveyId, $questionCode, [
+                'from' => $payload['from'] ?? null,
+                'to' => $payload['to'] ?? null,
+                'report_scope' => $payload['report_scope'] ?? null,
+            ], $authUser);
+            json_response(['success' => true, 'data' => $analysis]);
+
         case 'homologation_stats':
             $requirePermission(auth()->canAccessInsights(), 'No tiene permisos para consultar homologación electoral.');
             $surveyId = (int) ($payload['survey_id'] ?? 0);
