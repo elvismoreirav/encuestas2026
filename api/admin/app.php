@@ -113,6 +113,16 @@ try {
             ], $authUser);
             surveys()->downloadAnalyticsCountMatrixXlsx($stats);
 
+        case 'homologation_stats':
+            $requirePermission(auth()->canAccessInsights(), 'No tiene permisos para consultar homologación electoral.');
+            $surveyId = (int) ($payload['survey_id'] ?? 0);
+            $stats = surveys()->electionHomologationAnalytics($surveyId, [
+                'from' => $payload['from'] ?? null,
+                'to' => $payload['to'] ?? null,
+                'location' => $payload['location'] ?? null,
+            ], $authUser);
+            json_response(['success' => true, 'data' => $stats]);
+
         case 'save_user':
             $requirePermission(auth()->canManageUsers(), 'No tiene permisos para administrar usuarios.');
             $userId = users()->saveUser($payload, (int) auth()->id());

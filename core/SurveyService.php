@@ -1619,6 +1619,466 @@ class SurveyService
         ]);
     }
 
+    public function electionHomologationAnalytics(int $surveyId, array $filters = [], ?array $user = null): array
+    {
+        $survey = $this->getSurvey($surveyId, $user);
+        if (!$survey) {
+            throw new InvalidArgumentException('Encuesta no encontrada.');
+        }
+
+        $questionMeta = $this->buildElectionHomologationQuestionMeta($survey);
+        $locationQuestion = $this->resolveAnalyticsLocationQuestion($survey);
+        $selectedLocationValue = $this->normalizeAnalyticsFilterValue($filters['location'] ?? null);
+
+        $baseWhere = ['sr.survey_id = :survey_id'];
+        $baseParams = [':survey_id' => $surveyId];
+
+        if (!empty($filters['from'])) {
+            $baseWhere[] = 'sr.submitted_at >= :from';
+            $baseParams[':from'] = $filters['from'] . ' 00:00:00';
+        }
+
+        if (!empty($filters['to'])) {
+            $baseWhere[] = 'sr.submitted_at <= :to';
+            $baseParams[':to'] = $filters['to'] . ' 23:59:59';
+        }
+
+        $baseResponses = $this->db->fetchAll(
+            'SELECT sr.id, sr.submitted_at FROM survey_responses sr WHERE ' . implode(' AND ', $baseWhere) . ' ORDER BY sr.submitted_at ASC',
+            $baseParams
+        );
+        $baseTotalResponses = count($baseResponses);
+
+        $locationOptions = [];
+        if ($this->analyticsQuestionSupportsLocationFilter($locationQuestion)) {
+            $locationOptions = $this->fetchAnalyticsLocationOptions($locationQuestion, $baseWhere, $baseParams);
+            if ($selectedLocationValue !== null && !in_array($selectedLocationValue, array_column($locationOptions, 'value'), true)) {
+                $selectedLocationValue = null;
+            }
+        } else {
+            $selectedLocationValue = null;
+        }
+
+        $locationSelectedLabel = 'Todos';
+        foreach ($locationOptions as $option) {
+            if (($option['value'] ?? null) === $selectedLocationValue) {
+                $locationSelectedLabel = (string) ($option['label'] ?? 'Todos');
+                break;
+            }
+        }
+
+        $locationFilter = [
+            'enabled' => $this->analyticsQuestionSupportsLocationFilter($locationQuestion),
+            'question_code' => $locationQuestion['code'] ?? null,
+            'question_title' => $locationQuestion['prompt'] ?? null,
+            'question_type' => $locationQuestion['question_type'] ?? null,
+            'selected_value' => $selectedLocationValue ?? 'all',
+            'selected_label' => $locationSelectedLabel,
+            'all_label' => 'Todos',
+            'active_option_count' => count(array_filter($locationOptions, static fn(array $option): bool => (int) ($option['count'] ?? 0) > 0)),
+            'options' => array_merge([[
+                'value' => 'all',
+                'label' => 'Todos',
+                'count' => $baseTotalResponses,
+            ]], $locationOptions),
+        ];
+
+        $where = $baseWhere;
+        $params = $baseParams;
+        if ($selectedLocationValue !== null && $locationQuestion) {
+            $this->appendAnalyticsLocationConstraint($where, $params, $locationQuestion, $selectedLocationValue);
+        }
+
+        $responses = $selectedLocationValue === null
+            ? $baseResponses
+            : $this->db->fetchAll(
+                'SELECT sr.id, sr.submitted_at FROM survey_responses sr WHERE ' . implode(' AND ', $where) . ' ORDER BY sr.submitted_at ASC',
+                $params
+            );
+
+        $totalResponses = count($responses);
+        $questionPattern = '^Q(26|27|28|29|30)(_|$)';
+
+        $familyStats = [];
+        foreach ($questionMeta as $exactCode => $meta) {
+            $familyKey = (string) ($meta['family']['key'] ?? '');
+            if ($familyKey === '') {
+                continue;
+            }
+
+            $officeKey = (string) ($meta['family']['office_key'] ?? '');
+            $territoryValue = trim((string) ($meta['territory_value'] ?? ''));
+            if ($selectedLocationValue !== null && $officeKey !== 'prefectura' && $territoryValue !== '' && $territoryValue !== $selectedLocationValue) {
+                continue;
+            }
+
+            $familyStats[$familyKey] ??= [
+                'key' => $familyKey,
+                'base_code' => (string) ($meta['family']['base_code'] ?? ''),
+                'label' => (string) ($meta['family']['label'] ?? ''),
+                'office_key' => $officeKey,
+                'office_label' => (string) ($meta['family']['office_label'] ?? ''),
+                'ballot_key' => (string) ($meta['family']['ballot_key'] ?? ''),
+                'ballot_label' => (string) ($meta['family']['ballot_label'] ?? ''),
+                'sort_order' => (int) ($meta['family']['sort_order'] ?? 999),
+                'question_codes' => [],
+                'question_titles' => [],
+                'territories' => [],
+                'responses' => 0,
+                'coverage_percentage' => 0.0,
+                'first_submission_at' => null,
+                'last_submission_at' => null,
+                'options_map' => [],
+                'options' => [],
+                'top_option' => null,
+                'summary' => 'Sin respuestas homologadas dentro del filtro actual.',
+                'homologated_summary' => 'Sin lectura homologada.',
+                'has_activity' => false,
+            ];
+
+            $familyStats[$familyKey]['question_codes'][$exactCode] = true;
+            $familyStats[$familyKey]['question_titles'][trim((string) ($meta['title'] ?? $exactCode))] = true;
+            $territoryLabel = trim((string) ($meta['territory_label'] ?? ''));
+            if ($territoryLabel !== '') {
+                $familyStats[$familyKey]['territories'][$territoryLabel] = true;
+            }
+        }
+
+        if ($totalResponses > 0) {
+            $queryParams = [':election_question_pattern' => $questionPattern] + $params;
+
+            $answerCountRows = $this->db->fetchAll(
+                "SELECT
+                    ra.question_code,
+                    MIN(ra.question_prompt) AS question_prompt,
+                    COUNT(*) AS total,
+                    MIN(sr.submitted_at) AS first_submitted_at,
+                    MAX(sr.submitted_at) AS last_submitted_at
+                 FROM survey_responses sr
+                 INNER JOIN response_answers ra ON ra.response_id = sr.id
+                 WHERE " . implode(' AND ', $where) . "
+                   AND ra.question_code REGEXP :election_question_pattern
+                 GROUP BY ra.question_code
+                 ORDER BY ra.question_code ASC",
+                $queryParams
+            );
+
+            foreach ($answerCountRows as $row) {
+                $questionCode = trim((string) ($row['question_code'] ?? ''));
+                $family = $this->resolveElectionHomologationFamily($questionCode);
+                if ($family === null) {
+                    continue;
+                }
+
+                $familyKey = $family['key'];
+                $meta = $questionMeta[$questionCode] ?? [
+                    'title' => $this->sanitizeAnalyticsQuestionTitle((string) ($row['question_prompt'] ?? $family['label'])),
+                    'territory_label' => $family['office_key'] === 'prefectura' ? 'Provincial' : 'Sin territorio',
+                    'family' => $family,
+                ];
+
+                $familyStats[$familyKey] ??= [
+                    'key' => $familyKey,
+                    'base_code' => (string) ($family['base_code'] ?? ''),
+                    'label' => (string) ($family['label'] ?? ''),
+                    'office_key' => (string) ($family['office_key'] ?? ''),
+                    'office_label' => (string) ($family['office_label'] ?? ''),
+                    'ballot_key' => (string) ($family['ballot_key'] ?? ''),
+                    'ballot_label' => (string) ($family['ballot_label'] ?? ''),
+                    'sort_order' => (int) ($family['sort_order'] ?? 999),
+                    'question_codes' => [],
+                    'question_titles' => [],
+                    'territories' => [],
+                    'responses' => 0,
+                    'coverage_percentage' => 0.0,
+                    'first_submission_at' => null,
+                    'last_submission_at' => null,
+                    'options_map' => [],
+                    'options' => [],
+                    'top_option' => null,
+                    'summary' => 'Sin respuestas homologadas dentro del filtro actual.',
+                    'homologated_summary' => 'Sin lectura homologada.',
+                    'has_activity' => false,
+                ];
+
+                $familyStats[$familyKey]['question_codes'][$questionCode] = true;
+                $familyStats[$familyKey]['question_titles'][trim((string) ($meta['title'] ?? $questionCode))] = true;
+
+                $territoryLabel = trim((string) ($meta['territory_label'] ?? ''));
+                if ($territoryLabel !== '') {
+                    $familyStats[$familyKey]['territories'][$territoryLabel] = true;
+                }
+
+                $familyStats[$familyKey]['responses'] += (int) ($row['total'] ?? 0);
+
+                $firstSubmittedAt = $row['first_submitted_at'] ?? null;
+                $lastSubmittedAt = $row['last_submitted_at'] ?? null;
+
+                if ($firstSubmittedAt !== null && ($familyStats[$familyKey]['first_submission_at'] === null || strcmp((string) $firstSubmittedAt, (string) $familyStats[$familyKey]['first_submission_at']) < 0)) {
+                    $familyStats[$familyKey]['first_submission_at'] = $firstSubmittedAt;
+                }
+
+                if ($lastSubmittedAt !== null && ($familyStats[$familyKey]['last_submission_at'] === null || strcmp((string) $lastSubmittedAt, (string) $familyStats[$familyKey]['last_submission_at']) > 0)) {
+                    $familyStats[$familyKey]['last_submission_at'] = $lastSubmittedAt;
+                }
+            }
+
+            $optionRows = $this->db->fetchAll(
+                "SELECT
+                    ra.question_code,
+                    MIN(ra.question_prompt) AS question_prompt,
+                    rao.option_code,
+                    MIN(rao.option_label) AS option_label,
+                    COUNT(*) AS total
+                 FROM survey_responses sr
+                 INNER JOIN response_answers ra ON ra.response_id = sr.id
+                 INNER JOIN response_answer_options rao ON rao.response_answer_id = ra.id
+                 WHERE " . implode(' AND ', $where) . "
+                   AND ra.question_code REGEXP :election_question_pattern
+                 GROUP BY ra.question_code, rao.option_code
+                 ORDER BY ra.question_code ASC, total DESC",
+                $queryParams
+            );
+
+            foreach ($optionRows as $row) {
+                $questionCode = trim((string) ($row['question_code'] ?? ''));
+                $family = $this->resolveElectionHomologationFamily($questionCode);
+                if ($family === null) {
+                    continue;
+                }
+
+                $familyKey = $family['key'];
+                $meta = $questionMeta[$questionCode] ?? [
+                    'title' => $this->sanitizeAnalyticsQuestionTitle((string) ($row['question_prompt'] ?? $family['label'])),
+                    'options' => [],
+                    'option_labels' => [],
+                    'family' => $family,
+                ];
+                $resolvedLabel = $this->resolveAnalyticsOptionLabel(
+                    $meta,
+                    (string) ($row['option_code'] ?? ''),
+                    (string) ($row['option_label'] ?? '')
+                );
+                $bucket = $this->resolveElectionHomologationBucket((string) ($row['option_code'] ?? ''), $resolvedLabel);
+                $count = (int) ($row['total'] ?? 0);
+
+                $familyStats[$familyKey]['options_map'][$bucket['key']] ??= [
+                    'key' => $bucket['key'],
+                    'label' => $bucket['label'],
+                    'tone' => $bucket['tone'],
+                    'count' => 0,
+                    'percentage' => 0.0,
+                    'aliases' => [],
+                    'raw_codes' => [],
+                ];
+                $familyStats[$familyKey]['options_map'][$bucket['key']]['count'] += $count;
+                if ($resolvedLabel !== '') {
+                    $familyStats[$familyKey]['options_map'][$bucket['key']]['aliases'][$resolvedLabel] = true;
+                }
+                $rawCode = trim((string) ($row['option_code'] ?? ''));
+                if ($rawCode !== '') {
+                    $familyStats[$familyKey]['options_map'][$bucket['key']]['raw_codes'][$rawCode] = true;
+                }
+            }
+        }
+
+        $officeStats = [];
+        $equivalenceByOffice = [];
+
+        foreach ($familyStats as &$familyStat) {
+            $familyStat['coverage_percentage'] = $totalResponses > 0
+                ? round(($familyStat['responses'] / $totalResponses) * 100, 1)
+                : 0.0;
+            $familyStat['has_activity'] = $familyStat['responses'] > 0;
+            $familyStat['question_codes'] = array_values(array_keys($familyStat['question_codes']));
+            sort($familyStat['question_codes']);
+            $familyStat['question_titles'] = array_values(array_keys($familyStat['question_titles']));
+            $familyStat['territories'] = array_values(array_keys($familyStat['territories']));
+            sort($familyStat['territories']);
+            $familyStat['territory_label'] = $familyStat['office_key'] === 'prefectura'
+                ? 'Provincial'
+                : (count($familyStat['territories']) > 1
+                    ? 'Multicantón (' . count($familyStat['territories']) . ')'
+                    : ($familyStat['territories'][0] ?? 'Sin territorio'));
+            $familyStat['options'] = $this->finalizeElectionHomologationBuckets(
+                (array) ($familyStat['options_map'] ?? []),
+                (int) ($familyStat['responses'] ?? 0)
+            );
+            unset($familyStat['options_map']);
+
+            $familyStat['top_option'] = $familyStat['options'][0] ?? null;
+            $familyStat['summary'] = is_array($familyStat['top_option'])
+                ? sprintf(
+                    '%s lidera con %s (%d).',
+                    (string) ($familyStat['top_option']['label'] ?? 'La principal'),
+                    number_format((float) ($familyStat['top_option']['percentage'] ?? 0), 1) . '%',
+                    (int) ($familyStat['top_option']['count'] ?? 0)
+                )
+                : 'Sin respuestas homologadas dentro del filtro actual.';
+            $familyStat['homologated_summary'] = $this->summarizeElectionHomologationOptions(
+                array_slice((array) ($familyStat['options'] ?? []), 0, 4)
+            );
+
+            $officeKey = (string) ($familyStat['office_key'] ?? '');
+            if ($officeKey === '') {
+                continue;
+            }
+
+            $officeStats[$officeKey] ??= [
+                'key' => $officeKey,
+                'label' => (string) ($familyStat['office_label'] ?? ucfirst($officeKey)),
+                'sort_order' => $officeKey === 'prefectura' ? 1 : 2,
+                'family_count' => 0,
+                'responses' => 0,
+                'coverage_sum' => 0.0,
+                'average_coverage' => 0.0,
+                'options_map' => [],
+                'options' => [],
+                'top_option' => null,
+                'summary' => 'Sin respuestas homologadas.',
+            ];
+            $officeStats[$officeKey]['family_count']++;
+            $officeStats[$officeKey]['responses'] += (int) ($familyStat['responses'] ?? 0);
+            $officeStats[$officeKey]['coverage_sum'] += (float) ($familyStat['coverage_percentage'] ?? 0);
+
+            foreach ((array) ($familyStat['options'] ?? []) as $option) {
+                $officeStats[$officeKey]['options_map'][$option['key']] ??= [
+                    'key' => $option['key'],
+                    'label' => $option['label'],
+                    'tone' => $option['tone'],
+                    'count' => 0,
+                    'percentage' => 0.0,
+                    'aliases' => [],
+                    'raw_codes' => [],
+                ];
+                $officeStats[$officeKey]['options_map'][$option['key']]['count'] += (int) ($option['count'] ?? 0);
+
+                foreach ((array) ($option['aliases'] ?? []) as $alias) {
+                    $officeStats[$officeKey]['options_map'][$option['key']]['aliases'][$alias] = true;
+                }
+                foreach ((array) ($option['raw_codes'] ?? []) as $rawCode) {
+                    $officeStats[$officeKey]['options_map'][$option['key']]['raw_codes'][$rawCode] = true;
+                }
+
+                $equivalenceByOffice[$officeKey][$option['key']] ??= [
+                    'key' => $option['key'],
+                    'label' => $option['label'],
+                    'tone' => $option['tone'],
+                    'count' => 0,
+                    'aliases' => [],
+                    'raw_codes' => [],
+                    'family_labels' => [],
+                ];
+                $equivalenceByOffice[$officeKey][$option['key']]['count'] += (int) ($option['count'] ?? 0);
+                foreach ((array) ($option['aliases'] ?? []) as $alias) {
+                    $equivalenceByOffice[$officeKey][$option['key']]['aliases'][$alias] = true;
+                }
+                foreach ((array) ($option['raw_codes'] ?? []) as $rawCode) {
+                    $equivalenceByOffice[$officeKey][$option['key']]['raw_codes'][$rawCode] = true;
+                }
+                $equivalenceByOffice[$officeKey][$option['key']]['family_labels'][(string) ($familyStat['label'] ?? '')] = true;
+            }
+        }
+        unset($familyStat);
+
+        foreach ($officeStats as &$officeStat) {
+            $officeStat['average_coverage'] = $officeStat['family_count'] > 0
+                ? round($officeStat['coverage_sum'] / $officeStat['family_count'], 1)
+                : 0.0;
+            unset($officeStat['coverage_sum']);
+            $officeStat['options'] = $this->finalizeElectionHomologationBuckets(
+                (array) ($officeStat['options_map'] ?? []),
+                (int) ($officeStat['responses'] ?? 0)
+            );
+            unset($officeStat['options_map']);
+            $officeStat['top_option'] = $officeStat['options'][0] ?? null;
+            $officeStat['summary'] = is_array($officeStat['top_option'])
+                ? sprintf(
+                    '%s concentra %s (%d).',
+                    (string) ($officeStat['top_option']['label'] ?? 'El bloque principal'),
+                    number_format((float) ($officeStat['top_option']['percentage'] ?? 0), 1) . '%',
+                    (int) ($officeStat['top_option']['count'] ?? 0)
+                )
+                : 'Sin respuestas homologadas.';
+        }
+        unset($officeStat);
+
+        uasort($officeStats, static function (array $left, array $right): int {
+            return ((int) ($left['sort_order'] ?? 999) <=> (int) ($right['sort_order'] ?? 999))
+                ?: strcmp((string) ($left['label'] ?? ''), (string) ($right['label'] ?? ''));
+        });
+
+        uasort($familyStats, static function (array $left, array $right): int {
+            return ((int) ($left['sort_order'] ?? 999) <=> (int) ($right['sort_order'] ?? 999))
+                ?: strcmp((string) ($left['label'] ?? ''), (string) ($right['label'] ?? ''));
+        });
+
+        $equivalenceRows = [];
+        foreach ($officeStats as $officeKey => $officeStat) {
+            $officeEquivalences = $equivalenceByOffice[$officeKey] ?? [];
+            $officeRows = [];
+
+            foreach ($officeEquivalences as $bucketKey => $bucketRow) {
+                $aliases = array_values(array_keys((array) ($bucketRow['aliases'] ?? [])));
+                sort($aliases);
+                $rawCodes = array_values(array_keys((array) ($bucketRow['raw_codes'] ?? [])));
+                sort($rawCodes);
+                $familyLabels = array_values(array_keys((array) ($bucketRow['family_labels'] ?? [])));
+                sort($familyLabels);
+
+                $officeRows[] = [
+                    'key' => $bucketKey,
+                    'label' => (string) ($bucketRow['label'] ?? ''),
+                    'tone' => (string) ($bucketRow['tone'] ?? 'candidate'),
+                    'count' => (int) ($bucketRow['count'] ?? 0),
+                    'percentage' => (int) ($officeStat['responses'] ?? 0) > 0
+                        ? round(((int) ($bucketRow['count'] ?? 0) / (int) $officeStat['responses']) * 100, 1)
+                        : 0.0,
+                    'aliases' => $aliases,
+                    'raw_codes' => $rawCodes,
+                    'family_labels' => $familyLabels,
+                ];
+            }
+
+            usort($officeRows, fn(array $left, array $right): int => $this->compareElectionHomologationBucketRows($left, $right));
+
+            $equivalenceRows[] = [
+                'office_key' => $officeKey,
+                'office_label' => (string) ($officeStat['label'] ?? ucfirst($officeKey)),
+                'rows' => $officeRows,
+            ];
+        }
+
+        return [
+            'survey' => [
+                'id' => $survey['id'],
+                'name' => $survey['name'],
+                'status' => $survey['status'],
+                'status_label' => Helpers::statusLabel($survey['status']),
+                'start_at' => $survey['start_at'],
+                'end_at' => $survey['end_at'],
+                'window_status' => $survey['window_status'],
+            ],
+            'summary' => [
+                'responses' => $totalResponses,
+                'families' => count($familyStats),
+                'offices' => count($officeStats),
+                'active_families' => count(array_filter($familyStats, static fn(array $family): bool => (bool) ($family['has_activity'] ?? false))),
+                'location_label' => $locationFilter['selected_label'],
+                'first_submission_at' => $responses[0]['submitted_at'] ?? null,
+                'last_submission_at' => $responses !== [] ? $responses[count($responses) - 1]['submitted_at'] : null,
+                'date_range' => [
+                    'from' => $filters['from'] ?? null,
+                    'to' => $filters['to'] ?? null,
+                ],
+            ],
+            'location_filter' => $locationFilter,
+            'offices' => array_values($officeStats),
+            'families' => array_values($familyStats),
+            'equivalences' => $equivalenceRows,
+        ];
+    }
+
     private function buildAnalyticsQuickReadingLabel(array $row): string
     {
         $highlightLabel = trim((string) ($row['highlight_label'] ?? ''));
@@ -1639,6 +2099,352 @@ class SurveyService
         }
 
         return (string) ($row['summary'] ?? 'Sin lectura rápida.');
+    }
+
+    private function buildElectionHomologationQuestionMeta(array $survey): array
+    {
+        $locationLabels = $this->buildElectionHomologationLocationLabelMap($survey);
+        $meta = [];
+
+        foreach ((array) ($survey['questions_flat'] ?? []) as $question) {
+            $code = trim((string) ($question['code'] ?? ''));
+            $family = $this->resolveElectionHomologationFamily($code);
+            if ($family === null) {
+                continue;
+            }
+
+            $optionLabels = [];
+            foreach ((array) ($question['options'] ?? []) as $option) {
+                $optionCode = trim((string) ($option['code'] ?? ''));
+                if ($optionCode === '') {
+                    continue;
+                }
+
+                $optionLabels[$optionCode] = trim((string) ($option['label'] ?? $optionCode));
+            }
+
+            $meta[$code] = [
+                'code' => $code,
+                'title' => $this->sanitizeAnalyticsQuestionTitle((string) ($question['prompt'] ?? '')),
+                'options' => (array) ($question['options'] ?? []),
+                'option_labels' => $optionLabels,
+                'territory_value' => $this->resolveElectionHomologationTerritoryValue($question, (string) ($family['office_key'] ?? '')),
+                'territory_label' => $this->resolveElectionHomologationTerritoryLabel($question, $locationLabels, (string) ($family['office_key'] ?? '')),
+                'family' => $family,
+            ];
+        }
+
+        return $meta;
+    }
+
+    private function buildElectionHomologationLocationLabelMap(array $survey): array
+    {
+        $labels = [];
+        $locationQuestion = $this->resolveAnalyticsLocationQuestion($survey);
+        if (!is_array($locationQuestion)) {
+            return $labels;
+        }
+
+        foreach ((array) ($locationQuestion['options'] ?? []) as $option) {
+            $code = trim((string) ($option['code'] ?? ''));
+            if ($code === '') {
+                continue;
+            }
+
+            $labels[$code] = trim((string) ($option['label'] ?? $code));
+        }
+
+        return $labels;
+    }
+
+    private function resolveElectionHomologationTerritoryValue(array $question, string $officeKey): ?string
+    {
+        if ($officeKey === 'prefectura') {
+            return null;
+        }
+
+        foreach ((array) ($question['visibility_rules'] ?? []) as $rule) {
+            if (trim((string) ($rule['question_code'] ?? '')) !== 'Q1') {
+                continue;
+            }
+
+            if (trim((string) ($rule['operator'] ?? '')) !== 'equals') {
+                continue;
+            }
+
+            $value = trim((string) ($rule['value'] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveElectionHomologationTerritoryLabel(array $question, array $locationLabels, string $officeKey): string
+    {
+        if ($officeKey === 'prefectura') {
+            return 'Provincial';
+        }
+
+        foreach ((array) ($question['visibility_rules'] ?? []) as $rule) {
+            if (trim((string) ($rule['question_code'] ?? '')) !== 'Q1') {
+                continue;
+            }
+
+            if (trim((string) ($rule['operator'] ?? '')) !== 'equals') {
+                continue;
+            }
+
+            $value = trim((string) ($rule['value'] ?? ''));
+            if ($value === '') {
+                continue;
+            }
+
+            return trim((string) ($locationLabels[$value] ?? $this->humanizeElectionHomologationCode($value)));
+        }
+
+        return 'Multicantón';
+    }
+
+    private function resolveElectionHomologationFamily(string $questionCode): ?array
+    {
+        $normalized = strtoupper(trim($questionCode));
+
+        return match (true) {
+            preg_match('/^Q26(?:_|$)/', $normalized) === 1 => [
+                'key' => 'prefectura_a',
+                'base_code' => 'Q26',
+                'label' => 'Prefectura · Papeleta A',
+                'office_key' => 'prefectura',
+                'office_label' => 'Prefectura',
+                'ballot_key' => 'A',
+                'ballot_label' => 'Papeleta A',
+                'sort_order' => 10,
+            ],
+            preg_match('/^Q27(?:_|$)/', $normalized) === 1 => [
+                'key' => 'prefectura_b',
+                'base_code' => 'Q27',
+                'label' => 'Prefectura · Papeleta B',
+                'office_key' => 'prefectura',
+                'office_label' => 'Prefectura',
+                'ballot_key' => 'B',
+                'ballot_label' => 'Papeleta B',
+                'sort_order' => 20,
+            ],
+            preg_match('/^Q28(?:_|$)/', $normalized) === 1 => [
+                'key' => 'alcaldias_a',
+                'base_code' => 'Q28',
+                'label' => 'Alcaldías · Papeleta A',
+                'office_key' => 'alcaldias',
+                'office_label' => 'Alcaldías',
+                'ballot_key' => 'A',
+                'ballot_label' => 'Papeleta A',
+                'sort_order' => 30,
+            ],
+            preg_match('/^Q29(?:_|$)/', $normalized) === 1 => [
+                'key' => 'alcaldias_b',
+                'base_code' => 'Q29',
+                'label' => 'Alcaldías · Papeleta B',
+                'office_key' => 'alcaldias',
+                'office_label' => 'Alcaldías',
+                'ballot_key' => 'B',
+                'ballot_label' => 'Papeleta B',
+                'sort_order' => 40,
+            ],
+            preg_match('/^Q30(?:_|$)/', $normalized) === 1 => [
+                'key' => 'alcaldias_c',
+                'base_code' => 'Q30',
+                'label' => 'Alcaldías · Papeleta C',
+                'office_key' => 'alcaldias',
+                'office_label' => 'Alcaldías',
+                'ballot_key' => 'C',
+                'ballot_label' => 'Papeleta C',
+                'sort_order' => 50,
+            ],
+            default => null,
+        };
+    }
+
+    private function resolveElectionHomologationBucket(string $optionCode, string $label): array
+    {
+        $resolvedLabel = trim($label) !== '' ? trim($label) : $this->humanizeElectionHomologationCode($optionCode);
+        $normalized = $this->normalizeAnalyticsOptionBucketLabel($resolvedLabel);
+        $normalizedCode = strtoupper(trim($optionCode));
+
+        if (
+            str_contains($normalized, 'no sabe')
+            || str_contains($normalized, 'no ha decidido')
+            || str_contains($normalized, 'no contesta')
+        ) {
+            return ['key' => 'NO_SABE', 'label' => 'No sabe / no decide', 'tone' => 'neutral'];
+        }
+
+        if (
+            str_contains($normalized, 'nulo')
+            || str_contains($normalized, 'ninguno')
+            || str_contains($normalized, 'blanco')
+        ) {
+            return ['key' => 'NULO', 'label' => 'Nulo / ninguno', 'tone' => 'neutral'];
+        }
+
+        if (str_starts_with($normalized, 'otro') || str_contains($normalized, 'alguien nuevo')) {
+            return ['key' => 'OTRO', 'label' => 'Otro / nuevo', 'tone' => 'neutral'];
+        }
+
+        $organizationBuckets = [
+            'RC' => ['revolucion ciudadana', '- rc', ' rc ', 'correa', 'correista'],
+            'ADN' => ['adn'],
+            'SI_PODEMOS' => ['si podemos'],
+            'CAMINANTES' => ['caminantes'],
+            'AVANZA' => ['avanza', 'machete'],
+            'CONSTRUYE' => ['construye'],
+            'PSC' => ['psc'],
+            'CREO' => ['creo'],
+            'SUMA' => ['suma'],
+            'RETO' => ['reto'],
+            'PACHAKUTIK' => ['pachakutik'],
+        ];
+
+        foreach ($organizationBuckets as $bucketKey => $patterns) {
+            foreach ($patterns as $pattern) {
+                if (str_contains($normalized, $pattern)) {
+                    return [
+                        'key' => $bucketKey,
+                        'label' => match ($bucketKey) {
+                            'RC' => 'RC',
+                            'ADN' => 'ADN',
+                            'SI_PODEMOS' => 'Sí Podemos',
+                            'CAMINANTES' => 'Caminantes',
+                            'AVANZA' => 'Avanza',
+                            'CONSTRUYE' => 'Construye',
+                            'PSC' => 'PSC',
+                            'CREO' => 'CREO',
+                            'SUMA' => 'SUMA',
+                            'RETO' => 'Reto',
+                            'PACHAKUTIK' => 'Pachakutik',
+                            default => $resolvedLabel,
+                        },
+                        'tone' => 'party',
+                    ];
+                }
+            }
+        }
+
+        if ($normalizedCode === 'RC5') {
+            return ['key' => 'RC', 'label' => 'RC', 'tone' => 'party'];
+        }
+
+        $candidateLabel = $this->cleanElectionHomologationCandidateLabel($resolvedLabel);
+        if ($candidateLabel === '') {
+            $candidateLabel = $this->humanizeElectionHomologationCode($optionCode);
+        }
+
+        $candidateKey = strtoupper(str_replace(' ', '_', $this->normalizeAnalyticsOptionBucketLabel($candidateLabel)));
+        $candidateKey = preg_replace('/[^A-Z0-9_]+/', '_', $candidateKey) ?: 'CANDIDATURA';
+        $candidateKey = trim($candidateKey, '_');
+
+        return [
+            'key' => $candidateKey !== '' ? $candidateKey : 'CANDIDATURA',
+            'label' => $candidateLabel !== '' ? $candidateLabel : $resolvedLabel,
+            'tone' => 'candidate',
+        ];
+    }
+
+    private function cleanElectionHomologationCandidateLabel(string $label): string
+    {
+        $clean = trim($label);
+        if ($clean === '') {
+            return '';
+        }
+
+        $clean = preg_replace('/^[A-ZÁÉÍÓÚÑ]\.\s*/u', '', $clean) ?: $clean;
+        $clean = preg_replace('/^(candidato\s+de\s+|candidato\s+)/iu', '', $clean) ?: $clean;
+        $clean = preg_replace('/\s*-\s*.*/u', '', $clean) ?: $clean;
+        $clean = preg_replace('/\s+/', ' ', $clean) ?: $clean;
+
+        return trim($clean);
+    }
+
+    private function humanizeElectionHomologationCode(string $value): string
+    {
+        $normalized = trim(str_replace('_', ' ', strtolower($value)));
+        if ($normalized === '') {
+            return '';
+        }
+
+        return mb_convert_case($normalized, MB_CASE_TITLE, 'UTF-8');
+    }
+
+    private function finalizeElectionHomologationBuckets(array $bucketMap, int $responses): array
+    {
+        $buckets = [];
+
+        foreach ($bucketMap as $bucket) {
+            $aliases = array_values(array_keys((array) ($bucket['aliases'] ?? [])));
+            sort($aliases);
+            $rawCodes = array_values(array_keys((array) ($bucket['raw_codes'] ?? [])));
+            sort($rawCodes);
+
+            $buckets[] = [
+                'key' => (string) ($bucket['key'] ?? ''),
+                'label' => (string) ($bucket['label'] ?? ''),
+                'tone' => (string) ($bucket['tone'] ?? 'candidate'),
+                'count' => (int) ($bucket['count'] ?? 0),
+                'percentage' => $responses > 0 ? round(((int) ($bucket['count'] ?? 0) / $responses) * 100, 1) : 0.0,
+                'aliases' => $aliases,
+                'raw_codes' => $rawCodes,
+            ];
+        }
+
+        usort($buckets, fn(array $left, array $right): int => $this->compareElectionHomologationBucketRows($left, $right));
+
+        return $buckets;
+    }
+
+    private function compareElectionHomologationBucketRows(array $left, array $right): int
+    {
+        $leftRank = $this->electionHomologationBucketRank((string) ($left['key'] ?? ''), (string) ($left['tone'] ?? 'candidate'));
+        $rightRank = $this->electionHomologationBucketRank((string) ($right['key'] ?? ''), (string) ($right['tone'] ?? 'candidate'));
+
+        return ($leftRank <=> $rightRank)
+            ?: ((int) ($right['count'] ?? 0) <=> (int) ($left['count'] ?? 0))
+            ?: strcmp((string) ($left['label'] ?? ''), (string) ($right['label'] ?? ''));
+    }
+
+    private function electionHomologationBucketRank(string $key, string $tone): int
+    {
+        return match ($key) {
+            'NO_SABE' => 80,
+            'NULO' => 90,
+            'OTRO' => 100,
+            default => $tone === 'party' ? 10 : 30,
+        };
+    }
+
+    private function summarizeElectionHomologationOptions(array $options): string
+    {
+        $normalized = array_values(array_filter(array_map(static function (array $option): array {
+            return [
+                'label' => trim((string) ($option['label'] ?? '')),
+                'count' => (int) ($option['count'] ?? 0),
+                'percentage' => (float) ($option['percentage'] ?? 0),
+            ];
+        }, $options), static fn(array $option): bool => $option['label'] !== ''));
+
+        if ($normalized === []) {
+            return 'Sin lectura homologada.';
+        }
+
+        return implode(' | ', array_map(
+            static fn(array $option): string => sprintf(
+                '%s · %s (%d)',
+                $option['label'],
+                number_format($option['percentage'], 1) . '%',
+                $option['count']
+            ),
+            $normalized
+        ));
     }
 
     public function submitResponse(string $slug, array $payload): array
