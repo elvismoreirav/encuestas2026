@@ -117,7 +117,9 @@ require TEMPLATES_PATH . '/admin_header.php';
                     <p>Concentración por territorio, ubicación local y edad dentro de esta pregunta.</p>
                 </div>
             </div>
-            <div id="questionSegmentsGrid" class="question-segment-grid"></div>
+            <div class="question-segment-scroll">
+                <div id="questionSegmentsGrid" class="question-segment-grid"></div>
+            </div>
         </section>
     </div>
 
