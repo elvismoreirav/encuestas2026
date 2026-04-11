@@ -1033,16 +1033,63 @@ th {
     gap: 16px;
 }
 
-.editor-preview-matrix-shell .matrix-shell {
-    margin-top: 0;
-    overflow-x: auto;
-    padding-bottom: 4px;
+.editor-preview-matrix-rows {
+    display: grid;
+    gap: 16px;
 }
 
-.editor-preview-matrix-shell .matrix-head-grid,
-.editor-preview-matrix-shell .matrix-rows {
-    width: max-content;
-    min-width: 100%;
+.editor-preview-matrix-row {
+    display: grid;
+    gap: 16px;
+    padding: 18px;
+    border-radius: 22px;
+    border: 1px solid rgba(30, 77, 57, 0.12);
+    background: rgba(255, 255, 255, 0.96);
+}
+
+.editor-preview-matrix-row-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: flex-start;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(30, 77, 57, 0.08);
+}
+
+.editor-preview-matrix-row-copy {
+    display: grid;
+    gap: 8px;
+}
+
+.editor-preview-matrix-row-title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.editor-preview-matrix-dimensions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+}
+
+.editor-preview-matrix-dimension {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 18px;
+    border: 1px solid rgba(30, 77, 57, 0.1);
+    background: linear-gradient(180deg, rgba(243, 241, 234, 0.88), rgba(255, 255, 255, 0.98));
+}
+
+.editor-preview-matrix-dimension.is-missing {
+    border-color: rgba(180, 35, 24, 0.18);
+    background: linear-gradient(180deg, rgba(180, 35, 24, 0.06), rgba(255, 255, 255, 0.98));
+}
+
+.editor-preview-matrix-dimension header {
+    display: block;
 }
 
 .editor-preview-matrix-head {
@@ -1065,7 +1112,8 @@ th {
     line-height: 1.4;
 }
 
-.editor-question-preview .matrix-options {
+.editor-question-preview .matrix-options,
+.editor-preview-matrix-options {
     display: grid;
     gap: 8px;
 }
@@ -3731,7 +3779,8 @@ th {
     }
 
     .question-preview-actions,
-    .editor-question-preview-head {
+    .editor-question-preview-head,
+    .editor-preview-matrix-row-head {
         flex-direction: column;
         align-items: stretch;
     }
